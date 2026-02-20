@@ -5,7 +5,12 @@ VERSION="${1:-dev}"
 BINARY="xero"
 CMD="./cmd/xero"
 DIST="./dist"
-LDFLAGS="-s -w -X main.version=${VERSION}"
+
+# CLIENT_ID and PROXY_URL are injected from CI secrets (GitHub Actions env vars)
+LDFLAGS="-s -w \
+  -X main.version=${VERSION} \
+  -X main.defaultClientID=${CLIENT_ID:-} \
+  -X main.proxyURL=${PROXY_URL:-}"
 
 mkdir -p "${DIST}"
 

@@ -20,6 +20,9 @@ jobs:
           go-version: '1.23'
           cache: true
       - name: Build release binaries
+        env:
+          CLIENT_ID: ${{ secrets.XERO_CLIENT_ID }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
         run: |
           chmod +x scripts/release.sh
           ./scripts/release.sh ${{ github.ref_name }}

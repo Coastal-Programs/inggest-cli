@@ -2,9 +2,20 @@ BINARY    := xero
 CMD       := ./cmd/xero
 BUILD_DIR := ./build
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build install clean tidy run test lint fmt vet check help release
+# Inject Xero app credentials and proxy URL at build time.
+# Set these in your environment or a local .env file (never commit them).
+#   export CLIENT_ID=your-xero-client-id
+#   export PROXY_URL=https://zeus-auth-proxy.<subdomain>.workers.dev
+CLIENT_ID ?=
+PROXY_URL ?=
+
+LDFLAGS := -ldflags "-s -w \
+	-X main.version=$(VERSION) \
+	-X main.defaultClientID=$(CLIENT_ID) \
+	-X main.proxyURL=$(PROXY_URL)"
+
+.PHONY: build install clean tidy run test lint fmt vet check help release worker-deploy worker-dev
 
 ## help: Show available make targets
 help:
@@ -57,6 +68,14 @@ check: fmt vet lint
 release:
 	@chmod +x scripts/release.sh
 	@./scripts/release.sh $(VERSION)
+
+## worker-deploy: Deploy the Cloudflare auth proxy worker
+worker-deploy:
+	cd worker && npx wrangler deploy
+
+## worker-dev: Run the Cloudflare worker locally for testing
+worker-dev:
+	cd worker && npx wrangler dev
 
 ## clean: Remove build artifacts
 clean:
