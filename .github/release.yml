@@ -2,19 +2,20 @@ changelog:
   exclude:
     labels:
       - ignore-for-release
+    authors:
+      - dependabot[bot]
   categories:
+    - title: "Breaking Changes"
+      labels:
+        - breaking-change
+        - semver-major
     - title: "New Features"
       labels:
-        - feat
         - enhancement
+        - semver-minor
     - title: "Bug Fixes"
       labels:
-        - fix
         - bug
-    - title: "Documentation"
-      labels:
-        - docs
-        - documentation
     - title: "Other Changes"
       labels:
         - "*"
