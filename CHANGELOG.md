@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-02-20
 
+This release introduces the Cloudflare Worker auth proxy, which removes the Xero `client_secret` from the CLI binary entirely. Authentication is now gated through the Zeus Electron app — users cannot run `xero auth login` directly without being authorised through Zeus first.
+
 ### Added
 - Cloudflare Worker auth proxy (`worker/`) — `client_secret` now lives exclusively in Cloudflare, never in the CLI binary
 - Session token gating: `xero auth login` can only be initiated through the Zeus Electron app (requires `ZEUS_SESSION_TOKEN` env var set by Zeus)

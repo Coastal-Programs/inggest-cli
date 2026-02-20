@@ -37,12 +37,36 @@ Semver: `vMAJOR.MINOR.PATCH`
 - New command → MINOR (`v0.2.0`)
 - Breaking flag/output change → MAJOR (`v1.0.0`)
 
-Steps:
-1. Move `[Unreleased]` items in `CHANGELOG.md` to the new version + date
-2. `git commit -m "chore: release v0.2.0"`
-3. `git tag -a v0.2.0 -m "Release v0.2.0"` — annotated tags only, never lightweight
-4. `git push origin v0.2.0`
+### CHANGELOG.md format
 
-GitHub Actions then builds 5 platform binaries and publishes the GitHub Release automatically.
+The CHANGELOG entry becomes the GitHub Release description automatically — write it well.
+Each version block must have:
+- A one or two sentence **summary** at the top describing what this release is about
+- `### Added` — new commands, features, endpoints
+- `### Fixed` — bug fixes
+- `### Security` — any security improvements (if applicable)
+- `### Changed` — breaking changes or behaviour changes (if applicable)
 
-> Never push a tag without updating CHANGELOG.md first.
+Example:
+```markdown
+## [0.3.0] - 2026-03-01
+
+This release adds budget reporting commands and improves error messages across all commands.
+
+### Added
+- `xero reports budget-summary` — compare actuals vs budget by org
+- `xero reports budget-variance` — line-by-line variance report
+
+### Fixed
+- Auth refresh no longer silently fails when instance_token is missing
+```
+
+### Steps
+1. Write `CHANGELOG.md` entry with summary + categorised changes (see format above)
+2. `git commit -m "chore: release v0.3.0"`
+3. `git tag -a v0.3.0 -m "Release v0.3.0"` — annotated tags only, never lightweight
+4. `git push origin v0.3.0`
+
+GitHub Actions extracts the CHANGELOG entry and uses it as the release description, then builds 5 platform binaries automatically.
+
+> Never push a tag without a well-written CHANGELOG entry first.
