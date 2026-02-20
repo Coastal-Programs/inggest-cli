@@ -1,47 +1,40 @@
 ---
 name: fix
-description: Run typechecking and linting, then spawn parallel agents to fix all issues
+description: Run vet and lint, then spawn parallel agents to fix all issues
 ---
 
-# Project Code Quality Check
-
-Run all linting and typechecking tools, collect errors, group by domain, and spawn parallel agents to fix them.
-
-## Step 1: Run Linting and Typechecking
+## Step 1: Run checks
 
 ```bash
-npm run typecheck 2>&1
-npm run lint 2>&1
-npm run format:check 2>&1
+go vet ./... 2>&1
+golangci-lint run ./... 2>&1
 ```
 
-## Step 2: Collect and Parse Errors
+## Step 2: Collect and group errors
 
-Parse the output. Group errors by domain:
-- **Type errors**: TypeScript compiler errors from `tsc --noEmit`
-- **Lint errors**: ESLint issues from `eslint src/ tests/`
-- **Format errors**: Prettier issues from `prettier --check`
+Parse the output and group by type:
+- **Vet errors** — incorrect API usage, unreachable code, bad format strings
+- **Lint errors** — style violations, unused variables, error handling issues
+- **Build errors** — compilation failures
 
-Create a list of all files with issues and the specific problems in each file.
+## Step 3: Spawn parallel agents
 
-## Step 3: Spawn Parallel Agents
+For each category that has issues, spawn a parallel agent using the Task tool in a SINGLE response with MULTIPLE Task tool calls:
 
-For each domain that has issues, spawn an agent in parallel using the Task tool in a SINGLE response with MULTIPLE Task tool calls:
-
-- Spawn a "type-fixer" agent for type errors with the list of files and errors
-- Spawn a "lint-fixer" agent for lint errors with the list of files and errors
-- Spawn a "format-fixer" agent that runs `npm run format` to auto-fix formatting
+- Spawn a **vet-fixer** agent with the list of vet errors and affected files
+- Spawn a **lint-fixer** agent with the list of lint errors and affected files
 
 Each agent should:
-1. Receive the list of files and specific errors in their domain
-2. Fix all errors
-3. Run the relevant check command to verify fixes
+1. Read the affected files
+2. Fix all errors in that category
+3. Re-run the relevant check to verify
 4. Report completion
 
-## Step 4: Verify All Fixes
+## Step 4: Verify
 
-After all agents complete, run the full check:
+After all agents complete:
 ```bash
-npm run check
+make check
 ```
-Ensure all issues are resolved. If any remain, fix them directly.
+
+Confirm zero errors remain.

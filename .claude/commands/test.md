@@ -1,44 +1,41 @@
 ---
 name: test
-description: Run all tests, then spawn parallel agents to fix any failures
+description: Run all tests with race detector, then spawn parallel agents to fix any failures
 ---
 
-## Step 1: Run All Tests
+## Step 1: Run all tests
 
 ```bash
-npm run test 2>&1
+go test -race -v ./... 2>&1
 ```
 
-## Step 2: Analyze Results
+## Step 2: Analyse results
 
 If all tests pass, report success and stop.
 
-If there are failures, parse the output and group by test file:
-- `tests/unit/app.test.tsx` — React component tests (jsdom)
-- `tests/unit/ipc.test.ts` — IPC handler tests (node)
-- `tests/unit/preload.test.ts` — Preload script tests (node)
-- `tests/unit/main-process.test.ts` — Main process tests (node)
+If there are failures, parse the output and group by package:
+- `internal/auth` — OAuth flow, PKCE, proxy logic
+- `internal/xero` — API client, pagination, rate limiting
+- `internal/cli/commands` — command behaviour
+- `internal/common/config` — config load/save/resolve
+- `pkg/output` — formatter output
 
-## Step 3: Fix Failures
+## Step 3: Fix failures
 
-For each failing test file, spawn a parallel agent using the Task tool with the list of failures and the relevant source + test files.
+For each failing package, spawn a parallel agent using the Task tool in a SINGLE response with MULTIPLE Task tool calls.
 
 Each agent should:
-1. Read the failing test file and corresponding source file
-2. Fix the issue (in source or test, whichever is wrong)
-3. Run `npx vitest run <test-file>` to verify the fix
+1. Read the failing test file and the source file it tests
+2. Determine whether the source or the test is wrong
+3. Fix the issue
+4. Run `go test -race ./internal/<package>/...` to verify
+5. Report completion
 
 ## Step 4: Verify
 
-After all agents complete, run the full suite:
+After all agents complete:
 ```bash
-npm run test
+go test -race ./...
 ```
 
-Confirm all 37+ tests pass with zero failures.
-
-## Options
-
-- Watch mode: `npm run test:watch`
-- Single file: `npx vitest run tests/unit/app.test.tsx`
-- Filter by name: `npx vitest run -t "renders the app title"`
+Confirm all tests pass with zero failures.

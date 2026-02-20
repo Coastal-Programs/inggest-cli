@@ -1,27 +1,31 @@
 ---
 name: commit
-description: Run checks, commit with AI message, and push
+description: Run quality checks, then commit and push with a Conventional Commits message
 ---
 
-1. Run quality checks:
+1. Run quality gate:
    ```bash
-   npm run typecheck
-   npm run lint
-   npm run format:check
-   npm run test
+   make check
    ```
    Fix ALL errors before continuing.
 
-2. Review changes: `git status` and `git diff`
-
-3. Generate commit message:
-   - Start with verb (Add/Update/Fix/Remove/Refactor)
-   - Be specific and concise
-   - One line preferred
-
-4. Commit and push:
+2. Review what changed:
    ```bash
-   git add -A
-   git commit -m "your generated message"
+   git status
+   git diff
+   ```
+
+3. Stage and commit using Conventional Commits format:
+   - `feat:` new command or behaviour
+   - `fix:` bug fix
+   - `docs:` documentation only
+   - `chore:` maintenance, deps
+   - `refactor:` restructure, no behaviour change
+   - `ci:` workflow changes
+   - Imperative, lowercase, no trailing period
+
+   ```bash
+   git add <files>
+   git commit -m "type: description"
    git push
    ```

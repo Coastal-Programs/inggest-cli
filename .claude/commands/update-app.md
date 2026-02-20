@@ -1,62 +1,44 @@
 ---
 name: update-app
-description: Update dependencies, fix deprecations and warnings
+description: Update Go dependencies, tidy modules, and check for vulnerabilities
 ---
 
-# Dependency Update & Deprecation Fix
-
-## Step 1: Check for Updates
+## Step 1: Check what's outdated
 
 ```bash
-npm outdated
+go list -u -m all 2>/dev/null | grep '\['
 ```
 
-## Step 2: Update Dependencies
+## Step 2: Update dependencies
 
 ```bash
-npm update
-npm audit fix
+go get -u ./...
+go mod tidy
+go mod verify
 ```
 
-## Step 3: Check for Deprecations & Warnings
-
-Run a clean install and read ALL output carefully:
+## Step 3: Check for vulnerabilities
 
 ```bash
-rm -rf node_modules package-lock.json
-npm install 2>&1
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...
 ```
 
-Look for:
-- Deprecation warnings
-- Security vulnerabilities
-- Peer dependency warnings
-- Breaking changes
+Review any reported vulnerabilities and update affected packages.
 
-## Step 4: Fix Issues
-
-For each warning/deprecation:
-1. Research the recommended replacement or fix
-2. Update code/dependencies accordingly
-3. Re-run installation
-4. Verify no warnings remain
-
-## Step 5: Run Quality Checks
+## Step 4: Run quality checks
 
 ```bash
-npm run typecheck
-npm run lint
-npm run format:check
-npm run test
+make check
 ```
 
-Fix all errors before completing.
+Fix all errors before continuing.
 
-## Step 6: Verify Clean Install
+## Step 5: Verify clean build
 
 ```bash
-rm -rf node_modules package-lock.json
-npm install 2>&1
+make build
+./build/xero version
 ```
 
-Verify ZERO warnings/errors and all dependencies resolve correctly.
+Confirm the binary builds and runs cleanly with zero warnings.
