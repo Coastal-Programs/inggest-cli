@@ -1,0 +1,41 @@
+# Build artifacts
+/build/
+/dist/
+/xero
+/xero.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+vendor/
+
+# Config files (may contain OAuth tokens and client secrets)
+config.json
+.xero.json
+*.local.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
