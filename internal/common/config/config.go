@@ -23,9 +23,10 @@ type Config struct {
 	ClientSecret string `json:"client_secret"`
 
 	// OAuth tokens (populated after login)
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	TokenExpiry  int64  `json:"token_expiry"` // Unix timestamp
+	AccessToken   string `json:"access_token"`
+	RefreshToken  string `json:"refresh_token"`
+	TokenExpiry   int64  `json:"token_expiry"`   // Unix timestamp
+	InstanceToken string `json:"instance_token"` // Long-lived proxy authorisation token
 
 	// All connected orgs
 	Tenants []Tenant `json:"tenants"`
