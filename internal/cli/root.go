@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/jakeschepis/zeus-cli/internal/cli/commands"
+	"github.com/jakeschepis/zeus-cli/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +16,11 @@ var (
 // Execute runs the root command.
 func Execute(version string) error {
 	root := newRootCmd(version)
-	return root.Execute()
+	if err := root.Execute(); err != nil {
+		output.PrintError(err.Error(), nil)
+		return err
+	}
+	return nil
 }
 
 func newRootCmd(version string) *cobra.Command {
