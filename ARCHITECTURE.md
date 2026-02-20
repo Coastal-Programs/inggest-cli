@@ -258,7 +258,7 @@ Stored at `~/.config/xero/config.json` with `0600` permissions (owner read/write
 ### Development build
 ```bash
 export CLIENT_ID=your-xero-client-id
-export PROXY_URL=https://zeus-auth-proxy.<subdomain>.workers.dev
+export PROXY_URL=https://zeus-auth-proxy.curly-cherry-d5dc.workers.dev
 make build          # outputs ./build/xero
 ```
 
@@ -277,6 +277,16 @@ The `CLIENT_ID` and `PROXY_URL` are stored as GitHub Actions secrets (`XERO_CLIE
 | macOS | amd64 (Intel), arm64 (Apple Silicon) |
 | Linux | amd64, arm64 |
 | Windows | amd64 |
+
+---
+
+## Deployed Endpoints
+
+| Resource | Value |
+|---|---|
+| Worker URL | `https://zeus-auth-proxy.curly-cherry-d5dc.workers.dev` |
+| KV Namespace ID | `25d1d6f714964884ab762ba16135ee57` |
+| Cloudflare Account | `info@coastalprograms.com` |
 
 ---
 

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-20
+
+### Added
+- Cloudflare Worker auth proxy (`worker/`) — `client_secret` now lives exclusively in Cloudflare, never in the CLI binary
+- Session token gating: `xero auth login` can only be initiated through the Zeus Electron app (requires `ZEUS_SESSION_TOKEN` env var set by Zeus)
+- `POST /init-session` worker endpoint — Zeus app calls this with `ZEUS_ADMIN_SECRET` to issue a one-time 5-minute session token
+- `POST /token` worker endpoint — CLI exchanges PKCE auth code via proxy; consumes session token and returns Xero tokens + long-lived `instance_token`
+- `POST /refresh` worker endpoint — CLI refreshes Xero access token via proxy; validates `instance_token` to prove CLI was authorised through Zeus
+- Cloudflare KV (`SESSIONS` namespace) for session and instance token storage with TTL
+- `instance_token` field in local config (`~/.config/xero/config.json`)
+- `defaultClientID` and `proxyURL` build-time vars injected via ldflags — users no longer need to run `xero config set client_id`
+- GitHub Actions secrets `XERO_CLIENT_ID` and `PROXY_URL` wired into release workflow
+- `.claude/rules/` project memory restructure: `go.md`, `security.md`, `release.md`, `worker.md`
+- `ARCHITECTURE.md` system design document
+
+### Fixed
+- Errors from all commands now printed as JSON to stderr — previously silently swallowed due to `SilenceErrors: true` on root command
+
+### Security
+- `client_secret` removed from CLI binary entirely — only exists as an encrypted Cloudflare secret
+- Worker validates `redirect_uri` on every token exchange to prevent auth code injection
+- Admin secret comparison uses `crypto.subtle.timingSafeEqual` (timing-safe, per Cloudflare docs)
+- Session tokens are single-use — consumed and deleted from KV on first use
+
 ## [0.1.0] - 2026-02-20
 
 ### Added
