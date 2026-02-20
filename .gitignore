@@ -18,6 +18,10 @@ go.work
 go.work.sum
 vendor/
 
+# Worker
+worker/node_modules/
+worker/package-lock.json
+
 # Config files (may contain OAuth tokens and client secrets)
 config.json
 .xero.json
