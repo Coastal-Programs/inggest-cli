@@ -112,17 +112,107 @@ xero payments get <id>          # Get a payment
 xero payments create            # Apply a payment to an invoice
 ```
 
+### Credit Notes
+
+```bash
+xero credit-notes list              # List credit notes
+xero credit-notes get <id>          # Get a credit note by ID
+xero credit-notes create            # Create a credit note
+xero credit-notes apply             # Apply a credit note against an invoice
+```
+
+Flags: `--status`, `--type`, `--page`, `--org`, `--all-orgs`
+
+### Tracking Categories
+
+```bash
+xero tracking list                  # List tracking categories
+xero tracking get <id>              # Get a tracking category
+xero tracking create                # Create a tracking category
+xero tracking option add <id>       # Add an option to a category
+```
+
+### Manual Journals
+
+```bash
+xero journals list                  # List manual journals
+xero journals get <id>              # Get a manual journal
+xero journals create                # Create a manual journal
+```
+
+Flags: `--from`, `--to`, `--page`
+
+### Journal Ledger
+
+```bash
+xero journal-ledger list            # List journal ledger entries (audit trail)
+```
+
+Flags: `--from`, `--to`, `--offset` (0 = fetch all)
+
+### Purchase Orders
+
+```bash
+xero po list                        # List purchase orders
+xero po get <id>                    # Get a purchase order
+xero po create                      # Create a purchase order
+```
+
+Flags: `--status`, `--page`, `--org`, `--all-orgs`
+
+### Budgets
+
+```bash
+xero budgets list                   # List budgets
+xero budgets get <id>               # Get a budget by ID
+```
+
+### Overpayments & Prepayments
+
+```bash
+xero overpayments list              # List overpayments
+xero overpayments apply             # Apply an overpayment against an invoice
+xero prepayments list               # List prepayments
+xero prepayments apply              # Apply a prepayment against an invoice
+```
+
+Flags: `--page`, `--org`, `--all-orgs`
+
+### Quotes
+
+```bash
+xero quotes list                    # List quotes
+xero quotes get <id>                # Get a quote by ID
+xero quotes create                  # Create a quote
+xero quotes convert <id>            # Convert a quote to an invoice
+```
+
+Flags: `--status`, `--page`, `--org`, `--all-orgs`
+
+### Tax Rates
+
+```bash
+xero tax-rates list                 # List tax rates (reference data)
+```
+
 ### Reports
 
 ```bash
-xero reports profit-loss        # Profit & Loss
-xero reports balance-sheet      # Balance Sheet
-xero reports trial-balance      # Trial Balance
-xero reports aged-receivables   # Aged Receivables
-xero reports aged-payables      # Aged Payables
+xero reports profit-loss            # Profit & Loss
+xero reports balance-sheet          # Balance Sheet
+xero reports trial-balance          # Trial Balance
+xero reports aged-receivables       # Aged Receivables
+xero reports aged-payables          # Aged Payables
+xero reports cash-flow              # Cash Flow Summary
+xero reports budget-variance        # Budget Variance
+xero reports account-transactions   # Account Transactions
+xero reports executive-summary      # Executive Summary
+xero reports bank-summary           # Bank Summary
 ```
 
 Flags: `--from`, `--to`, `--org`, `--all-orgs`
+
+The `profit-loss` report also supports `--tracking-category` and `--tracking-option` to filter by tracking segment.
 
 ### Bank
 

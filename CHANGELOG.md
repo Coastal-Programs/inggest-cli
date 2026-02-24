@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release closes the full Xero Accounting API gap, adding credit notes, tracking categories, manual journals, purchase orders, budgets, overpayments, prepayments, quotes, tax rates, and five new financial reports.
+
+### Added
+- `xero credit-notes` — list (auto-paginated), get, create, apply against invoice (`--credit-note-id`, `--invoice-id`, `--amount`)
+- `xero tracking` — list, get, create tracking categories; `option add` to add category options
+- `xero journals` — list (auto-paginated), get, create manual journals
+- `xero journal-ledger` — list journal ledger entries with offset-based pagination (read-only audit trail)
+- `xero po` — list (auto-paginated), get, create purchase orders
+- `xero budgets` — list and get budgets (read-only; created in Xero UI)
+- `xero overpayments` — list (auto-paginated), apply against invoice
+- `xero prepayments` — list (auto-paginated), apply against invoice
+- `xero quotes` — list (auto-paginated), get, create, convert to invoice
+- `xero tax-rates list` — list tax rates (reference data)
+- `xero reports cash-flow` — Cash Flow Summary report
+- `xero reports budget-variance` — Budget Variance report (`--budget-id` required)
+- `xero reports account-transactions` — Account Transactions report (`--account-code` required)
+- `xero reports executive-summary` — Executive Summary report
+- `xero reports bank-summary` — Bank Summary report
+- `--tracking-category` and `--tracking-option` flags on `xero reports profit-loss` for segment filtering
+
 ## [0.2.0] - 2026-02-20
 
 This release introduces the Cloudflare Worker auth proxy, which removes the Xero `client_secret` from the CLI binary entirely. Authentication is now gated through the Zeus Electron app — users cannot run `xero auth login` directly without being authorised through Zeus first.

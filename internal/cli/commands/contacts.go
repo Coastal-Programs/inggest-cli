@@ -52,9 +52,9 @@ func newContactsListCmd(format *string, org *string) *cobra.Command {
 
 func newContactsGetCmd(format *string, org *string) *cobra.Command {
 	return &cobra.Command{
-		Use:  "get <contact-id>",
+		Use:   "get <contact-id>",
 		Short: "Get a single contact by ID",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, _, err := getClientForOrg(*org)
 			if err != nil {
@@ -109,16 +109,16 @@ func newContactsCreateCmd(format *string, org *string) *cobra.Command {
 	cmd.Flags().StringVar(&taxNumber, "tax-number", "", "Tax/VAT number")
 	cmd.Flags().BoolVar(&isCustomer, "customer", false, "Mark as a customer")
 	cmd.Flags().BoolVar(&isSupplier, "supplier", false, "Mark as a supplier")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
 
 func newContactsUpdateCmd(format *string, org *string) *cobra.Command {
 	var name, firstName, lastName, email, accountNum string
 	cmd := &cobra.Command{
-		Use:  "update <contact-id>",
+		Use:   "update <contact-id>",
 		Short: "Update an existing contact",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input := xero.ContactCreateInput{
 				Name:          name,

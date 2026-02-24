@@ -7,17 +7,17 @@ import (
 
 // Contact represents a Xero contact (customer or supplier).
 type Contact struct {
-	ContactID       string   `json:"ContactID"`
-	Name            string   `json:"Name"`
-	FirstName       string   `json:"FirstName,omitempty"`
-	LastName        string   `json:"LastName,omitempty"`
-	EmailAddress    string   `json:"EmailAddress,omitempty"`
-	IsCustomer      bool     `json:"IsCustomer"`
-	IsSupplier      bool     `json:"IsSupplier"`
-	AccountNumber   string   `json:"AccountNumber,omitempty"`
-	TaxNumber       string   `json:"TaxNumber,omitempty"`
-	ContactStatus   string   `json:"ContactStatus"`
-	UpdatedDateUTC  string   `json:"UpdatedDateUTC,omitempty"`
+	ContactID      string `json:"ContactID"`
+	Name           string `json:"Name"`
+	FirstName      string `json:"FirstName,omitempty"`
+	LastName       string `json:"LastName,omitempty"`
+	EmailAddress   string `json:"EmailAddress,omitempty"`
+	IsCustomer     bool   `json:"IsCustomer"`
+	IsSupplier     bool   `json:"IsSupplier"`
+	AccountNumber  string `json:"AccountNumber,omitempty"`
+	TaxNumber      string `json:"TaxNumber,omitempty"`
+	ContactStatus  string `json:"ContactStatus"`
+	UpdatedDateUTC string `json:"UpdatedDateUTC,omitempty"`
 }
 
 type contactsResponse struct {
@@ -26,14 +26,14 @@ type contactsResponse struct {
 
 // ContactCreateInput is the payload for creating or updating a contact.
 type ContactCreateInput struct {
-	Name         string `json:"Name"`
-	FirstName    string `json:"FirstName,omitempty"`
-	LastName     string `json:"LastName,omitempty"`
-	EmailAddress string `json:"EmailAddress,omitempty"`
+	Name          string `json:"Name"`
+	FirstName     string `json:"FirstName,omitempty"`
+	LastName      string `json:"LastName,omitempty"`
+	EmailAddress  string `json:"EmailAddress,omitempty"`
 	AccountNumber string `json:"AccountNumber,omitempty"`
-	TaxNumber    string `json:"TaxNumber,omitempty"`
-	IsCustomer   bool   `json:"IsCustomer,omitempty"`
-	IsSupplier   bool   `json:"IsSupplier,omitempty"`
+	TaxNumber     string `json:"TaxNumber,omitempty"`
+	IsCustomer    bool   `json:"IsCustomer,omitempty"`
+	IsSupplier    bool   `json:"IsSupplier,omitempty"`
 }
 
 // ListContacts fetches contacts with optional search/filter.

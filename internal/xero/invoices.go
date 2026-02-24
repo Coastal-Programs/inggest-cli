@@ -8,22 +8,22 @@ import (
 
 // Invoice represents a Xero invoice.
 type Invoice struct {
-	InvoiceID    string     `json:"InvoiceID"`
-	InvoiceNumber string    `json:"InvoiceNumber"`
-	Type         string     `json:"Type"`
-	Status       string     `json:"Status"`
-	Contact      Contact    `json:"Contact"`
-	DateString   string     `json:"DateString"`
-	DueDateString string    `json:"DueDateString"`
-	LineAmountTypes string  `json:"LineAmountTypes"`
-	LineItems    []LineItem `json:"LineItems"`
-	SubTotal     float64    `json:"SubTotal"`
-	TotalTax     float64    `json:"TotalTax"`
-	Total        float64    `json:"Total"`
-	AmountDue    float64    `json:"AmountDue"`
-	AmountPaid   float64    `json:"AmountPaid"`
-	CurrencyCode string     `json:"CurrencyCode"`
-	UpdatedDateUTC string   `json:"UpdatedDateUTC"`
+	InvoiceID       string     `json:"InvoiceID"`
+	InvoiceNumber   string     `json:"InvoiceNumber"`
+	Type            string     `json:"Type"`
+	Status          string     `json:"Status"`
+	Contact         Contact    `json:"Contact"`
+	DateString      string     `json:"DateString"`
+	DueDateString   string     `json:"DueDateString"`
+	LineAmountTypes string     `json:"LineAmountTypes"`
+	LineItems       []LineItem `json:"LineItems"`
+	SubTotal        float64    `json:"SubTotal"`
+	TotalTax        float64    `json:"TotalTax"`
+	Total           float64    `json:"Total"`
+	AmountDue       float64    `json:"AmountDue"`
+	AmountPaid      float64    `json:"AmountPaid"`
+	CurrencyCode    string     `json:"CurrencyCode"`
+	UpdatedDateUTC  string     `json:"UpdatedDateUTC"`
 }
 
 // LineItem is a line on an invoice or bill.

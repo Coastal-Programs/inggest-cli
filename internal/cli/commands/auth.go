@@ -114,4 +114,3 @@ func newAuthRefreshCmd(format *string) *cobra.Command {
 		},
 	}
 }
-

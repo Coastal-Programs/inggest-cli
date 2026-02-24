@@ -7,16 +7,16 @@ import (
 
 // Account represents a Xero chart-of-accounts account.
 type Account struct {
-	AccountID               string  `json:"AccountID"`
-	Code                    string  `json:"Code"`
-	Name                    string  `json:"Name"`
-	Type                    string  `json:"Type"`
-	TaxType                 string  `json:"TaxType,omitempty"`
-	Description             string  `json:"Description,omitempty"`
-	Class                   string  `json:"Class"`
-	Status                  string  `json:"Status"`
-	EnablePaymentsToAccount bool    `json:"EnablePaymentsToAccount"`
-	ShowInExpenseClaims     bool    `json:"ShowInExpenseClaims"`
+	AccountID               string `json:"AccountID"`
+	Code                    string `json:"Code"`
+	Name                    string `json:"Name"`
+	Type                    string `json:"Type"`
+	TaxType                 string `json:"TaxType,omitempty"`
+	Description             string `json:"Description,omitempty"`
+	Class                   string `json:"Class"`
+	Status                  string `json:"Status"`
+	EnablePaymentsToAccount bool   `json:"EnablePaymentsToAccount"`
+	ShowInExpenseClaims     bool   `json:"ShowInExpenseClaims"`
 }
 
 type accountsResponse struct {

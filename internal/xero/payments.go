@@ -8,16 +8,16 @@ import (
 
 // Payment represents a Xero payment.
 type Payment struct {
-	PaymentID    string  `json:"PaymentID"`
-	Date         string  `json:"Date"`
-	Amount       float64 `json:"Amount"`
-	Reference    string  `json:"Reference,omitempty"`
-	PaymentType  string  `json:"PaymentType"`
-	Status       string  `json:"Status"`
-	Invoice      Invoice `json:"Invoice,omitempty"`
-	Account      Account `json:"Account,omitempty"`
-	CurrencyRate float64 `json:"CurrencyRate,omitempty"`
-	UpdatedDateUTC string `json:"UpdatedDateUTC,omitempty"`
+	PaymentID      string  `json:"PaymentID"`
+	Date           string  `json:"Date"`
+	Amount         float64 `json:"Amount"`
+	Reference      string  `json:"Reference,omitempty"`
+	PaymentType    string  `json:"PaymentType"`
+	Status         string  `json:"Status"`
+	Invoice        Invoice `json:"Invoice,omitempty"`
+	Account        Account `json:"Account,omitempty"`
+	CurrencyRate   float64 `json:"CurrencyRate,omitempty"`
+	UpdatedDateUTC string  `json:"UpdatedDateUTC,omitempty"`
 }
 
 type paymentsResponse struct {

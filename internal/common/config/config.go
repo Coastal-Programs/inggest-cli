@@ -9,7 +9,6 @@ import (
 	"sync"
 )
 
-
 // Tenant represents a connected Xero organisation.
 type Tenant struct {
 	TenantID   string `json:"tenant_id"`

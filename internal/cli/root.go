@@ -51,6 +51,16 @@ It returns structured JSON output, making it ideal for scripting and AI agents.`
 		commands.NewBankCmd(&outputFormat, &orgQuery),
 		commands.NewItemsCmd(&outputFormat, &orgQuery),
 		commands.NewConfigCmd(&outputFormat),
+		commands.NewCreditNotesCmd(&outputFormat, &orgQuery),
+		commands.NewTrackingCmd(&outputFormat, &orgQuery),
+		commands.NewJournalsCmd(&outputFormat, &orgQuery),
+		commands.NewJournalLedgerCmd(&outputFormat, &orgQuery),
+		commands.NewPurchaseOrdersCmd(&outputFormat, &orgQuery),
+		commands.NewBudgetsCmd(&outputFormat, &orgQuery),
+		commands.NewOverpaymentsCmd(&outputFormat, &orgQuery),
+		commands.NewPrepaymentsCmd(&outputFormat, &orgQuery),
+		commands.NewQuotesCmd(&outputFormat, &orgQuery),
+		commands.NewTaxRatesCmd(&outputFormat, &orgQuery),
 	)
 
 	return cmd

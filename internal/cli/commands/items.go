@@ -69,11 +69,11 @@ func newItemsCreateCmd(format *string, org *string) *cobra.Command {
 		Short: "Create a new inventory item",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input := xero.ItemCreateInput{
-				Code:        code,
-				Name:        name,
-				Description: description,
-				IsSold:      isSold,
-				IsPurchased: isPurchased,
+				Code:            code,
+				Name:            name,
+				Description:     description,
+				IsSold:          isSold,
+				IsPurchased:     isPurchased,
 				SalesDetails:    xero.ItemDetails{UnitPrice: salesPrice, AccountCode: salesAccount},
 				PurchaseDetails: xero.ItemDetails{UnitPrice: buyPrice, AccountCode: buyAccount},
 			}
@@ -97,7 +97,7 @@ func newItemsCreateCmd(format *string, org *string) *cobra.Command {
 	cmd.Flags().StringVar(&buyAccount, "purchase-account", "", "Purchase account code")
 	cmd.Flags().BoolVar(&isSold, "sold", false, "Item is sold")
 	cmd.Flags().BoolVar(&isPurchased, "purchased", false, "Item is purchased")
-	cmd.MarkFlagRequired("code")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("code")
+	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }

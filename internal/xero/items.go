@@ -4,13 +4,13 @@ import "fmt"
 
 // Item represents a Xero inventory item.
 type Item struct {
-	ItemID      string  `json:"ItemID"`
-	Code        string  `json:"Code"`
-	Name        string  `json:"Name"`
-	Description string  `json:"Description,omitempty"`
-	IsTracked   bool    `json:"IsTracked"`
-	IsSold      bool    `json:"IsSold"`
-	IsPurchased bool    `json:"IsPurchased"`
+	ItemID          string      `json:"ItemID"`
+	Code            string      `json:"Code"`
+	Name            string      `json:"Name"`
+	Description     string      `json:"Description,omitempty"`
+	IsTracked       bool        `json:"IsTracked"`
+	IsSold          bool        `json:"IsSold"`
+	IsPurchased     bool        `json:"IsPurchased"`
 	SalesDetails    ItemDetails `json:"SalesDetails,omitempty"`
 	PurchaseDetails ItemDetails `json:"PurchaseDetails,omitempty"`
 	UpdatedDateUTC  string      `json:"UpdatedDateUTC,omitempty"`
@@ -29,11 +29,11 @@ type itemsResponse struct {
 
 // ItemCreateInput is the payload for creating an item.
 type ItemCreateInput struct {
-	Code        string      `json:"Code"`
-	Name        string      `json:"Name"`
-	Description string      `json:"Description,omitempty"`
-	IsSold      bool        `json:"IsSold,omitempty"`
-	IsPurchased bool        `json:"IsPurchased,omitempty"`
+	Code            string      `json:"Code"`
+	Name            string      `json:"Name"`
+	Description     string      `json:"Description,omitempty"`
+	IsSold          bool        `json:"IsSold,omitempty"`
+	IsPurchased     bool        `json:"IsPurchased,omitempty"`
 	SalesDetails    ItemDetails `json:"SalesDetails,omitempty"`
 	PurchaseDetails ItemDetails `json:"PurchaseDetails,omitempty"`
 }

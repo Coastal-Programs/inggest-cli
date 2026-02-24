@@ -21,6 +21,11 @@ func NewReportsCmd(format *string, org *string) *cobra.Command {
 		newReportsTrialBalanceCmd(format, org),
 		newReportsAgedReceivablesCmd(format, org),
 		newReportsAgedPayablesCmd(format, org),
+		newReportsCashFlowCmd(format, org),
+		newReportsBudgetVarianceCmd(format, org),
+		newReportsAccountTransactionsCmd(format, org),
+		newReportsExecutiveSummaryCmd(format, org),
+		newReportsBankSummaryCmd(format, org),
 	)
 	return cmd
 }
@@ -32,13 +37,14 @@ func firstOfYear() string {
 }
 
 func newReportsPLCmd(format *string, org *string) *cobra.Command {
-	var fromDate, toDate string
+	var fromDate, toDate, trackingCategoryID, trackingOptionID string
 	var allOrgs bool
 	cmd := &cobra.Command{
 		Use:   "profit-loss",
 		Short: "Profit & Loss report",
 		Example: `  xero reports profit-loss
   xero reports profit-loss --from 2024-01-01 --to 2024-03-31
+  xero reports profit-loss --tracking-category <id> --tracking-option <id>
   xero reports profit-loss --all-orgs --from 2024-01-01 --to 2024-12-31`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fromDate == "" {
@@ -48,15 +54,16 @@ func newReportsPLCmd(format *string, org *string) *cobra.Command {
 				toDate = today()
 			}
 			if allOrgs {
+				from, to, tc, to2 := fromDate, toDate, trackingCategoryID, trackingOptionID
 				return runReportAllOrgs(format, func(client *xero.Client) (any, error) {
-					return client.GetProfitAndLoss(fromDate, toDate)
+					return client.GetProfitAndLoss(from, to, tc, to2)
 				})
 			}
 			client, _, err := getClientForOrg(*org)
 			if err != nil {
 				return err
 			}
-			report, err := client.GetProfitAndLoss(fromDate, toDate)
+			report, err := client.GetProfitAndLoss(fromDate, toDate, trackingCategoryID, trackingOptionID)
 			if err != nil {
 				return err
 			}
@@ -65,6 +72,8 @@ func newReportsPLCmd(format *string, org *string) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&fromDate, "from", "", "Start date (YYYY-MM-DD, defaults to Jan 1 of current year)")
 	cmd.Flags().StringVar(&toDate, "to", "", "End date (YYYY-MM-DD, defaults to today)")
+	cmd.Flags().StringVar(&trackingCategoryID, "tracking-category", "", "Filter by tracking category ID")
+	cmd.Flags().StringVar(&trackingOptionID, "tracking-option", "", "Filter by tracking option ID")
 	cmd.Flags().BoolVar(&allOrgs, "all-orgs", false, "Run report across all connected orgs")
 	return cmd
 }
@@ -182,6 +191,174 @@ func newReportsAgedPayablesCmd(format *string, org *string) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&date, "date", "", "Report date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&contactID, "contact-id", "", "Filter to a specific contact")
+	return cmd
+}
+
+func newReportsCashFlowCmd(format *string, org *string) *cobra.Command {
+	var fromDate, toDate string
+	var allOrgs bool
+	cmd := &cobra.Command{
+		Use:   "cash-flow",
+		Short: "Cash flow summary report",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromDate == "" {
+				fromDate = firstOfYear()
+			}
+			if toDate == "" {
+				toDate = today()
+			}
+			if allOrgs {
+				from, to := fromDate, toDate
+				return runReportAllOrgs(format, func(client *xero.Client) (any, error) {
+					return client.GetCashFlow(from, to)
+				})
+			}
+			client, _, err := getClientForOrg(*org)
+			if err != nil {
+				return err
+			}
+			report, err := client.GetCashFlow(fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return output.Print(report, output.Format(*format))
+		},
+	}
+	cmd.Flags().StringVar(&fromDate, "from", "", "Start date (YYYY-MM-DD, defaults to Jan 1 of current year)")
+	cmd.Flags().StringVar(&toDate, "to", "", "End date (YYYY-MM-DD, defaults to today)")
+	cmd.Flags().BoolVar(&allOrgs, "all-orgs", false, "Run report across all connected orgs")
+	return cmd
+}
+
+func newReportsBudgetVarianceCmd(format *string, org *string) *cobra.Command {
+	var fromDate, toDate, budgetID string
+	cmd := &cobra.Command{
+		Use:   "budget-variance",
+		Short: "Budget variance report",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromDate == "" {
+				fromDate = firstOfYear()
+			}
+			if toDate == "" {
+				toDate = today()
+			}
+			client, _, err := getClientForOrg(*org)
+			if err != nil {
+				return err
+			}
+			report, err := client.GetBudgetVariance(budgetID, fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return output.Print(report, output.Format(*format))
+		},
+	}
+	cmd.Flags().StringVar(&budgetID, "budget-id", "", "Budget ID (required)")
+	cmd.Flags().StringVar(&fromDate, "from", "", "Start date (YYYY-MM-DD, defaults to Jan 1 of current year)")
+	cmd.Flags().StringVar(&toDate, "to", "", "End date (YYYY-MM-DD, defaults to today)")
+	_ = cmd.MarkFlagRequired("budget-id")
+	return cmd
+}
+
+func newReportsAccountTransactionsCmd(format *string, org *string) *cobra.Command {
+	var fromDate, toDate, accountCode string
+	cmd := &cobra.Command{
+		Use:   "account-transactions",
+		Short: "Account transactions report",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromDate == "" {
+				fromDate = firstOfYear()
+			}
+			if toDate == "" {
+				toDate = today()
+			}
+			client, _, err := getClientForOrg(*org)
+			if err != nil {
+				return err
+			}
+			report, err := client.GetAccountTransactions(accountCode, fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return output.Print(report, output.Format(*format))
+		},
+	}
+	cmd.Flags().StringVar(&accountCode, "account-code", "", "Account code (required)")
+	cmd.Flags().StringVar(&fromDate, "from", "", "Start date (YYYY-MM-DD, defaults to Jan 1 of current year)")
+	cmd.Flags().StringVar(&toDate, "to", "", "End date (YYYY-MM-DD, defaults to today)")
+	_ = cmd.MarkFlagRequired("account-code")
+	return cmd
+}
+
+func newReportsExecutiveSummaryCmd(format *string, org *string) *cobra.Command {
+	var fromDate, toDate string
+	var allOrgs bool
+	cmd := &cobra.Command{
+		Use:   "executive-summary",
+		Short: "Executive summary report",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromDate == "" {
+				fromDate = firstOfYear()
+			}
+			if toDate == "" {
+				toDate = today()
+			}
+			if allOrgs {
+				from, to := fromDate, toDate
+				return runReportAllOrgs(format, func(client *xero.Client) (any, error) {
+					return client.GetExecutiveSummary(from, to)
+				})
+			}
+			client, _, err := getClientForOrg(*org)
+			if err != nil {
+				return err
+			}
+			report, err := client.GetExecutiveSummary(fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return output.Print(report, output.Format(*format))
+		},
+	}
+	cmd.Flags().StringVar(&fromDate, "from", "", "Start date (YYYY-MM-DD, defaults to Jan 1 of current year)")
+	cmd.Flags().StringVar(&toDate, "to", "", "End date (YYYY-MM-DD, defaults to today)")
+	cmd.Flags().BoolVar(&allOrgs, "all-orgs", false, "Run report across all connected orgs")
+	return cmd
+}
+
+func newReportsBankSummaryCmd(format *string, org *string) *cobra.Command {
+	var fromDate, toDate string
+	var allOrgs bool
+	cmd := &cobra.Command{
+		Use:   "bank-summary",
+		Short: "Bank summary report",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromDate == "" {
+				fromDate = firstOfYear()
+			}
+			if toDate == "" {
+				toDate = today()
+			}
+			if allOrgs {
+				from, to := fromDate, toDate
+				return runReportAllOrgs(format, func(client *xero.Client) (any, error) {
+					return client.GetBankSummary(from, to)
+				})
+			}
+			client, _, err := getClientForOrg(*org)
+			if err != nil {
+				return err
+			}
+			report, err := client.GetBankSummary(fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return output.Print(report, output.Format(*format))
+		},
+	}
+	cmd.Flags().StringVar(&fromDate, "from", "", "Start date (YYYY-MM-DD, defaults to Jan 1 of current year)")
+	cmd.Flags().StringVar(&toDate, "to", "", "End date (YYYY-MM-DD, defaults to today)")
+	cmd.Flags().BoolVar(&allOrgs, "all-orgs", false, "Run report across all connected orgs")
 	return cmd
 }
 
