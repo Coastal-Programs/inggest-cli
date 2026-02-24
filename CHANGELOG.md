@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-24
+
 This release closes the full Xero Accounting API gap, adding credit notes, tracking categories, manual journals, purchase orders, budgets, overpayments, prepayments, quotes, tax rates, and five new financial reports.
 
 ### Added
