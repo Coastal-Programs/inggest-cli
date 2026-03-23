@@ -296,3 +296,65 @@ func TestEnvGet_NotFound(t *testing.T) {
 		t.Errorf("expected error to contain %q, got: %v", "not found", err)
 	}
 }
+
+func TestEnvGet_TextOutput(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListApps": listAppsResponse,
+		"GetApp":   getAppResponse,
+	}, map[string]http.HandlerFunc{})
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+	state.Output = "text"
+
+	var cmdErr error
+	out := captureStdout(t, func() {
+		cmd := NewEnvCmd()
+		cmd.SetArgs([]string{"get", "my-app"})
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+		cmdErr = cmd.Execute()
+	})
+
+	if cmdErr != nil {
+		t.Fatalf("unexpected error: %v", cmdErr)
+	}
+
+	if !strings.Contains(out, "my-app") {
+		t.Errorf("expected text output to contain %q, got: %s", "my-app", out)
+	}
+	if !strings.Contains(out, "Name:") {
+		t.Errorf("expected text output to contain %q, got: %s", "Name:", out)
+	}
+}
+
+func TestEnvGet_ByID(t *testing.T) {
+	// List doesn't find by name, so fallback to GetApp by ID
+	srv := newMockServer(t, map[string]string{
+		"ListApps": `{"data":{"apps":[]}}`,
+		"GetApp":   getAppResponse,
+	}, map[string]http.HandlerFunc{})
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+	state.Output = "json"
+
+	var cmdErr error
+	out := captureStdout(t, func() {
+		cmd := NewEnvCmd()
+		cmd.SetArgs([]string{"get", "app-1"})
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+		cmdErr = cmd.Execute()
+	})
+
+	if cmdErr != nil {
+		t.Fatalf("unexpected error: %v", cmdErr)
+	}
+
+	if !strings.Contains(out, "my-app") {
+		t.Errorf("expected output to contain %q, got: %s", "my-app", out)
+	}
+}

@@ -572,3 +572,82 @@ func TestAuthStatus_CustomAPIURL(t *testing.T) {
 		t.Errorf("expected custom_api_url=true, got %v", result["custom_api_url"])
 	}
 }
+
+func TestAuthLoginWithSigningKeyFallback(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-primary", "--signing-key-fallback", "signkey-test-fallback"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if state.Config.SigningKey != "signkey-test-primary" {
+		t.Errorf("expected signing key %q, got %q", "signkey-test-primary", state.Config.SigningKey)
+	}
+	if state.Config.SigningKeyFallback != "signkey-test-fallback" {
+		t.Errorf("expected signing key fallback %q, got %q", "signkey-test-fallback", state.Config.SigningKeyFallback)
+	}
+	// Output should contain redacted fallback
+	if !strings.Contains(got, "signing_key_fallback") {
+		t.Errorf("expected output to contain signing_key_fallback, got: %s", got)
+	}
+}
+
+func TestAuthLoginFallbackFromEnv(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-envfallback")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-primary"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if state.Config.SigningKeyFallback != "signkey-test-envfallback" {
+		t.Errorf("expected signing key fallback %q, got %q", "signkey-test-envfallback", state.Config.SigningKeyFallback)
+	}
+}
+
+func TestAuthLoginInvalidFallbackKey(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-primary", "--signing-key-fallback", "bad-fallback"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid signing key fallback")
+	}
+	if !strings.Contains(err.Error(), "invalid signing key fallback") {
+		t.Errorf("expected error about invalid signing key fallback, got: %v", err)
+	}
+}

@@ -301,3 +301,197 @@ func TestConfigSource(t *testing.T) {
 		t.Errorf("expected source 'unknown' for bogus key, got %q", got)
 	}
 }
+
+func TestConfigSetEventKey(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"set", "event_key", "my-event-key-123"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	var out string
+	var execErr error
+	out = captureStdout(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+
+	if state.Config.EventKey != "my-event-key-123" {
+		t.Errorf("expected EventKey %q, got %q", "my-event-key-123", state.Config.EventKey)
+	}
+	// Event key should be redacted in output
+	if strings.Contains(out, "my-event-key-123") {
+		t.Error("output contains unredacted event key")
+	}
+}
+
+func TestConfigSetAPIBaseURL(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"set", "api_base_url", "https://custom.inngest.com"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	var execErr error
+	captureStdout(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+
+	if state.Config.APIBaseURL != "https://custom.inngest.com" {
+		t.Errorf("expected APIBaseURL %q, got %q", "https://custom.inngest.com", state.Config.APIBaseURL)
+	}
+}
+
+func TestConfigSetDevServerURL(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"set", "dev_server_url", "http://localhost:9999"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	var execErr error
+	captureStdout(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+
+	if state.Config.DevServerURL != "http://localhost:9999" {
+		t.Errorf("expected DevServerURL %q, got %q", "http://localhost:9999", state.Config.DevServerURL)
+	}
+}
+
+func TestConfigSetInvalidKey(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"set", "bogus_key", "value"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid config key")
+	}
+	if !strings.Contains(err.Error(), "unrecognized config key") {
+		t.Errorf("expected error about unrecognized key, got: %v", err)
+	}
+}
+
+func TestConfigSetValidSigningKey(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"set", "signing_key", "signkey-test-valid123"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	var execErr error
+	captureStdout(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+
+	if state.Config.SigningKey != "signkey-test-valid123" {
+		t.Errorf("expected SigningKey %q, got %q", "signkey-test-valid123", state.Config.SigningKey)
+	}
+}
+
+func TestGetConfigValue_AllKeys(t *testing.T) {
+	cfg := &config.Config{
+		SigningKey:   "signkey-test-123",
+		EventKey:     "evt-key-123",
+		ActiveEnv:    "staging",
+		APIBaseURL:   "https://custom.api.com",
+		DevServerURL: "http://localhost:9999",
+	}
+
+	tests := []struct {
+		key      string
+		expected string
+	}{
+		{"signing_key", "signkey-test-123"},
+		{"event_key", "evt-key-123"},
+		{"active_env", "staging"},
+		{"api_base_url", "https://custom.api.com"},
+		{"dev_server_url", "http://localhost:9999"},
+		{"unknown_key", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			got := getConfigValue(cfg, tt.key)
+			if got != tt.expected {
+				t.Errorf("getConfigValue(%q) = %q, want %q", tt.key, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfigSource_AllKeys(t *testing.T) {
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	cfg := &config.Config{
+		APIBaseURL:   "https://custom.api.com",
+		DevServerURL: "http://localhost:9999",
+	}
+
+	if got := configSource(cfg, "api_base_url"); got != "config" {
+		t.Errorf("expected source 'config' for api_base_url, got %q", got)
+	}
+	if got := configSource(cfg, "dev_server_url"); got != "config" {
+		t.Errorf("expected source 'config' for dev_server_url, got %q", got)
+	}
+
+	cfg2 := &config.Config{}
+	if got := configSource(cfg2, "api_base_url"); got != "default" {
+		t.Errorf("expected source 'default' for empty api_base_url, got %q", got)
+	}
+	if got := configSource(cfg2, "dev_server_url"); got != "default" {
+		t.Errorf("expected source 'default' for empty dev_server_url, got %q", got)
+	}
+
+	// event_key from env
+	t.Setenv("INNGEST_EVENT_KEY", "evt-from-env")
+	cfg3 := &config.Config{}
+	if got := configSource(cfg3, "event_key"); got != "env (INNGEST_EVENT_KEY)" {
+		t.Errorf("expected source 'env (INNGEST_EVENT_KEY)' for event_key from env, got %q", got)
+	}
+}

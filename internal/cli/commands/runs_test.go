@@ -3,7 +3,9 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -471,6 +473,209 @@ func TestRunsList_InvalidUntil(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid --until duration") {
 		t.Errorf("expected error about invalid until duration, got: %v", err)
+	}
+}
+
+func TestRunsWatch_ContextCancel(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false,"endCursor":"c1"},"totalCount":1}}}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"watch", "--interval", "10ms"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	// The watch command uses signal.NotifyContext(context.Background(), os.Interrupt).
+	// We send ourselves SIGINT after a short delay.
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	// Give the watch command time to do at least one poll, then send SIGINT.
+	time.Sleep(50 * time.Millisecond)
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch command didn't stop after SIGINT")
+	}
+}
+
+func TestRunsWatch_WithFilters(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"watch", "--interval", "10ms", "--status", "Completed,Failed", "--function", "fn-1"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch command didn't stop after SIGINT")
+	}
+}
+
+func TestRunsWatch_ErrorContinues(t *testing.T) {
+	// Server closes immediately → ListRuns will fail, but the watch loop should log and continue.
+	srv := newMockServer(t, nil, nil)
+	closedURL := srv.URL
+	srv.Close()
+
+	setupCloudState(t, closedURL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"watch", "--interval", "10ms"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	// Let it poll and hit errors for a bit, then stop.
+	time.Sleep(50 * time.Millisecond)
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch command didn't stop after SIGINT")
+	}
+}
+
+func TestRunsCancel_NonForce_Yes(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"CancelRun": `{"data":{"cancelRun":{"id":"run-1","status":"CANCELLED"}}}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	// Pipe "y\n" to stdin to simulate confirmation.
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte("y\n"))
+		w.Close()
+	}()
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"cancel", "run-1"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if result["id"] != "run-1" {
+		t.Errorf("expected id %q, got %v", "run-1", result["id"])
+	}
+	if result["status"] != "CANCELLED" {
+		t.Errorf("expected status %q, got %v", "CANCELLED", result["status"])
+	}
+}
+
+func TestRunsCancel_NonForce_No(t *testing.T) {
+	setupCloudState(t, "http://localhost:9999")
+
+	// Pipe "n\n" to stdin to decline.
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte("n\n"))
+		w.Close()
+	}()
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"cancel", "run-1"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	// Should succeed (return nil) — cancellation was declined.
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunsReplay_Text(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"Rerun": `{"data":{"rerun":"new-run-id"}}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+	state.Output = "text"
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"replay", "run-1"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "new-run-id") {
+		t.Errorf("expected output to contain new-run-id, got: %s", got)
+	}
+}
+
+func TestRunsCmd_BareHelp(t *testing.T) {
+	// Calling the parent command with no subcommand should print help (not error).
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error from bare runs command: %v", err)
 	}
 }
 

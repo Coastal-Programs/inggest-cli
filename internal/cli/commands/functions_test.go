@@ -433,3 +433,60 @@ func TestFunctionsConfig_Text(t *testing.T) {
 		t.Errorf("expected output to contain %q, got: %s", "Retries", got)
 	}
 }
+
+func TestFunctionsCmd_BareHelp(t *testing.T) {
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error from bare functions command: %v", err)
+	}
+}
+
+func TestBuildConfigOutput_InvalidJSON(t *testing.T) {
+	fn := &inngest.Function{
+		Slug:   "test",
+		Name:   "Test",
+		Config: `not-json`,
+	}
+
+	result := buildConfigOutput(fn)
+
+	// With invalid JSON, rawConfig should be the raw string.
+	if result["rawConfig"] != "not-json" {
+		t.Errorf("expected rawConfig to be raw string when JSON is invalid, got %v", result["rawConfig"])
+	}
+}
+
+func TestFunctionsGet_TextOutput(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"GetFunction": getFunctionResponse,
+	}, nil)
+	defer srv.Close()
+
+	setupFunctionsTestState(t, srv.URL)
+	state.Output = "text"
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"get", "process-payment"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "Process Payment") {
+		t.Errorf("expected text output to contain %q, got: %s", "Process Payment", got)
+	}
+	if !strings.Contains(got, "Name:") {
+		t.Errorf("expected text output to contain %q, got: %s", "Name:", got)
+	}
+}

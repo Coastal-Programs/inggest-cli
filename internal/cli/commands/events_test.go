@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -157,6 +158,171 @@ func TestEventsSend_Success(t *testing.T) {
 
 	if !strings.Contains(got, `"event_ids"`) {
 		t.Errorf("expected output to contain \"event_ids\", got: %s", got)
+	}
+}
+
+func TestEventsSend_Stdin(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/e/*": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"ids":["evt-stdin-1"],"status":200}`))
+		},
+	})
+	defer srv.Close()
+
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{EventKey: "test-key"}
+	state.Output = "json"
+	state.DevMode = true
+	state.DevServer = srv.URL
+	state.APIBaseURL = srv.URL
+	state.AppVersion = "test"
+
+	// Feed JSON via stdin pipe.
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte(`{"from":"stdin"}`))
+		w.Close()
+	}()
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"send", "test/stdin-event"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "evt-stdin-1") {
+		t.Errorf("expected output to contain %q, got: %s", "evt-stdin-1", got)
+	}
+}
+
+func TestEventsSend_StdinInvalidJSON(t *testing.T) {
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{EventKey: "test-key"}
+	state.Output = "json"
+	state.DevMode = true
+	state.DevServer = "http://localhost:8288"
+	state.APIBaseURL = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	// Feed invalid JSON via stdin pipe.
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte(`not-json`))
+		w.Close()
+	}()
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"send", "test/event"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid stdin JSON")
+	}
+	if !strings.Contains(err.Error(), "invalid stdin JSON") {
+		t.Errorf("expected error about invalid stdin JSON, got: %v", err)
+	}
+}
+
+func TestEventsSend_StdinEmpty(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/e/*": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"ids":["evt-empty-1"],"status":200}`))
+		},
+	})
+	defer srv.Close()
+
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{EventKey: "test-key"}
+	state.Output = "json"
+	state.DevMode = true
+	state.DevServer = srv.URL
+	state.APIBaseURL = srv.URL
+	state.AppVersion = "test"
+
+	// Feed empty stdin.
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Close()
+	}()
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"send", "test/event"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "evt-empty-1") {
+		t.Errorf("expected output to contain %q, got: %s", "evt-empty-1", got)
+	}
+}
+
+func TestEventsCmd_BareHelp(t *testing.T) {
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error from bare events command: %v", err)
+	}
+}
+
+func TestEventsSend_InvalidData(t *testing.T) {
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{EventKey: "test-key"}
+	state.Output = "json"
+	state.DevMode = true
+	state.DevServer = "http://localhost:8288"
+	state.APIBaseURL = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"send", "test/event", "--data", "not-json"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid JSON data")
+	}
+	if !strings.Contains(err.Error(), "invalid --data JSON") {
+		t.Errorf("expected error about invalid JSON, got: %v", err)
 	}
 }
 

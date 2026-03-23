@@ -479,6 +479,165 @@ func TestBacklog_TextOutput(t *testing.T) {
 	}
 }
 
+func TestBacklog_TextWithEntries(t *testing.T) {
+	srv := newMockServer(t,
+		map[string]string{
+			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c1"},{"node":{"id":"r2","status":"QUEUED","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+		},
+		nil,
+	)
+	defer srv.Close()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "text"
+	state.APIBaseURL = srv.URL
+	state.DevServer = srv.URL
+	state.DevMode = false
+	state.AppVersion = "test"
+	state.Env = ""
+
+	cmd := NewBacklogCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "Process Payment") {
+		t.Errorf("expected text output to contain 'Process Payment', got: %s", got)
+	}
+}
+
+func TestBacklog_UnknownFunction(t *testing.T) {
+	srv := newMockServer(t,
+		map[string]string{
+			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING"},"cursor":"c1"}],"pageInfo":{"hasNextPage":false},"totalCount":1}}}`,
+		},
+		nil,
+	)
+	defer srv.Close()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "json"
+	state.APIBaseURL = srv.URL
+	state.DevServer = srv.URL
+	state.DevMode = false
+	state.AppVersion = "test"
+	state.Env = ""
+
+	cmd := NewBacklogCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// Runs with no Function should be grouped under "(unknown)".
+	if !strings.Contains(got, "(unknown)") {
+		t.Errorf("expected output to contain '(unknown)' for runs with nil function, got: %s", got)
+	}
+}
+
+func TestMetrics_Truncated(t *testing.T) {
+	// Simulate pagination that returns hasNextPage=true for maxPages pages.
+	// The mock will always say hasNextPage=true so the metrics loop hits the truncation limit.
+	srv := newMockServer(t,
+		map[string]string{
+			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"totalCount":100}}}`,
+		},
+		nil,
+	)
+	defer srv.Close()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "json"
+	state.APIBaseURL = srv.URL
+	state.DevServer = srv.URL
+	state.DevMode = false
+	state.AppVersion = "test"
+	state.Env = ""
+
+	cmd := NewMetricsCmd()
+	cmd.SetArgs([]string{"--since", "24h"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if truncated, ok := result["truncated"].(bool); !ok || !truncated {
+		t.Errorf("expected truncated=true, got %v", result["truncated"])
+	}
+}
+
+func TestMetrics_TextTruncated(t *testing.T) {
+	srv := newMockServer(t,
+		map[string]string{
+			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"totalCount":100}}}`,
+		},
+		nil,
+	)
+	defer srv.Close()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "text"
+	state.APIBaseURL = srv.URL
+	state.DevServer = srv.URL
+	state.DevMode = false
+	state.AppVersion = "test"
+	state.Env = ""
+
+	cmd := NewMetricsCmd()
+	cmd.SetArgs([]string{"--since", "24h"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "truncated") {
+		t.Errorf("expected text output to contain 'truncated', got: %s", got)
+	}
+	if !strings.Contains(got, "Duration") {
+		t.Errorf("expected text output to contain 'Duration', got: %s", got)
+	}
+}
+
 func TestBacklog_TableOutput(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
