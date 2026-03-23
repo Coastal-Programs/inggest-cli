@@ -3,19 +3,26 @@ package cli
 import (
 	"os"
 
-	"github.com/jakeschepis/zeus-cli/internal/cli/commands"
-	"github.com/jakeschepis/zeus-cli/pkg/output"
+	"github.com/Coastal-Programs/inggest-cli/internal/cli/commands"
+	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
+	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+	"github.com/Coastal-Programs/inggest-cli/pkg/output"
 	"github.com/spf13/cobra"
 )
 
 var (
+	// Flag values
 	outputFormat string
-	orgQuery     string
+	flagEnv      string
+	flagAPIURL   string
+	flagDev      bool
+	flagDevURL   string
 )
 
 // Execute runs the root command.
 func Execute(version string) error {
-	root := newRootCmd(version)
+	state.AppVersion = version
+	root := newRootCmd()
 	if err := root.Execute(); err != nil {
 		output.PrintError(err.Error(), nil)
 		return err
@@ -23,45 +30,75 @@ func Execute(version string) error {
 	return nil
 }
 
-func newRootCmd(version string) *cobra.Command {
+func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "xero",
-		Short: "Xero accounting CLI",
-		Long: `xero is a command-line interface for the Xero accounting API.
-It returns structured JSON output, making it ideal for scripting and AI agents.`,
+		Use:   "inngest",
+		Short: "CLI for Inngest — monitor, debug, and manage functions",
+		Long: `inngest is a command-line interface for Inngest.
+
+Monitor, debug, and manage your Inngest functions from the terminal.
+Works with both Inngest Cloud and local dev server.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			state.Config = cfg
+
+			// Resolve env: flag > config > default "production"
+			state.Env = "production"
+			if cfg.ActiveEnv != "" {
+				state.Env = cfg.ActiveEnv
+			}
+			if flagEnv != "" {
+				state.Env = flagEnv
+			}
+
+			// Resolve API base URL: flag > config > default
+			state.APIBaseURL = cfg.GetAPIBaseURL()
+			if flagAPIURL != "" {
+				state.APIBaseURL = flagAPIURL
+			}
+
+			// Resolve dev server URL: flag > config > default
+			state.DevServer = cfg.GetDevServerURL()
+			if flagDevURL != "" {
+				state.DevServer = flagDevURL
+			}
+
+			state.DevMode = flagDev
+			state.Output = outputFormat
+
+			return nil
+		},
 	}
 
 	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "json", "Output format: json, text, table")
-	cmd.PersistentFlags().StringVar(&orgQuery, "org", "", "Target org by name or ID (defaults to active org)")
+	cmd.PersistentFlags().StringVarP(&flagEnv, "env", "e", "", "Target environment (production, staging, branch name)")
+	cmd.PersistentFlags().StringVar(&flagAPIURL, "api-url", "", "Override API base URL (for self-hosted Inngest)")
+	cmd.PersistentFlags().BoolVar(&flagDev, "dev", false, "Target local dev server instead of Inngest Cloud")
+	cmd.PersistentFlags().StringVar(&flagDevURL, "dev-url", "", "Override dev server URL")
 
 	cmd.SetErr(os.Stderr)
 	cmd.SetOut(os.Stdout)
 
-	cmd.AddCommand(
-		commands.NewVersionCmd(version),
-		commands.NewAuthCmd(&outputFormat),
-		commands.NewOrgsCmd(&outputFormat, &orgQuery),
-		commands.NewInvoicesCmd(&outputFormat, &orgQuery),
-		commands.NewContactsCmd(&outputFormat, &orgQuery),
-		commands.NewAccountsCmd(&outputFormat, &orgQuery),
-		commands.NewPaymentsCmd(&outputFormat, &orgQuery),
-		commands.NewReportsCmd(&outputFormat, &orgQuery),
-		commands.NewBankCmd(&outputFormat, &orgQuery),
-		commands.NewItemsCmd(&outputFormat, &orgQuery),
-		commands.NewConfigCmd(&outputFormat),
-		commands.NewCreditNotesCmd(&outputFormat, &orgQuery),
-		commands.NewTrackingCmd(&outputFormat, &orgQuery),
-		commands.NewJournalsCmd(&outputFormat, &orgQuery),
-		commands.NewJournalLedgerCmd(&outputFormat, &orgQuery),
-		commands.NewPurchaseOrdersCmd(&outputFormat, &orgQuery),
-		commands.NewBudgetsCmd(&outputFormat, &orgQuery),
-		commands.NewOverpaymentsCmd(&outputFormat, &orgQuery),
-		commands.NewPrepaymentsCmd(&outputFormat, &orgQuery),
-		commands.NewQuotesCmd(&outputFormat, &orgQuery),
-		commands.NewTaxRatesCmd(&outputFormat, &orgQuery),
-	)
+	// Register command groups
+	cmd.AddCommand(commands.NewAuthCmd())
+	cmd.AddCommand(commands.NewVersionCmd())
+	cmd.AddCommand(commands.NewConfigCmd())
+	cmd.AddCommand(commands.NewDevCmd())
+	cmd.AddCommand(commands.NewEventsCmd())
+	cmd.AddCommand(commands.NewFunctionsCmd())
+	cmd.AddCommand(commands.NewRunsCmd())
+	cmd.AddCommand(commands.NewEnvCmd())
+	cmd.AddCommand(commands.NewHealthCmd())
+	cmd.AddCommand(commands.NewMetricsCmd())
+	cmd.AddCommand(commands.NewBacklogCmd())
 
 	return cmd
 }

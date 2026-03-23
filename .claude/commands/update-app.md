@@ -38,7 +38,7 @@ Fix all errors before continuing.
 
 ```bash
 make build
-./build/xero version
+./build/inngest version
 ```
 
 Confirm the binary builds and runs cleanly with zero warnings.

@@ -9,7 +9,7 @@ A clear description of what went wrong.
 
 **Command run**
 ```
-xero <command> <flags>
+inngest <command> <flags>
 ```
 
 **Expected behaviour**
@@ -22,5 +22,5 @@ paste output here
 
 **Environment**
 - OS:
-- `xero version`:
+- `inngest version`:
 - Go version (if built from source):

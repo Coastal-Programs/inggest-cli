@@ -11,8 +11,7 @@ paths:
 
 ## HTTP
 - Always set an explicit timeout — never use `http.DefaultClient` bare
-- Auth layer uses `authHTTPClient` (15s timeout) — don't create new clients in auth code
-- Xero API layer uses the shared transport in `internal/xero/client.go`
+- Inngest API layer uses the shared transport in `internal/inngest/client.go`
 
 ## URLs
 - Query params: always `url.Values{}` and `.Encode()` — never string concatenation
@@ -23,13 +22,14 @@ paths:
 - Errors always go to stderr via `output.PrintError(msg, err)`
 - Respect the `--output` flag — never hard-code a format inside a command
 
-## Xero API
-- Xero pagination is 1-indexed — never pass `page=0` to the API
-- `page=0` in CLI flags means auto-paginate: loop until a batch returns < 100 records
-- 429 rate limit handling lives in `client.go` — don't add retry logic elsewhere
+## Inngest API
+- GraphQL API at `api.inngest.com/gql` — used for functions, runs, environments, metrics
+- REST API at `api.inngest.com/v1/` — used for sending events
+- Dev server at `localhost:8288` — no auth required
+- Three auth modes: signing key (GraphQL/REST), event key (events), no auth (dev server)
 
 ## Adding a New Command
-1. `internal/xero/<resource>.go` — API client methods
+1. `internal/inngest/<resource>.go` — API client methods (or add to `client.go`)
 2. `internal/cli/commands/<resource>.go` — Cobra command(s)
 3. Register in `internal/cli/root.go`
 4. Add to Commands section of `README.md`

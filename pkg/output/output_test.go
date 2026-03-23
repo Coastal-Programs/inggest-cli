@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jakeschepis/zeus-cli/pkg/output"
+	"github.com/Coastal-Programs/inggest-cli/pkg/output"
 )
 
 // captureStdout replaces os.Stdout with a pipe for the duration of fn,
@@ -239,6 +239,35 @@ func TestPrint_Table_NonStructSlice_FallsBackToText(t *testing.T) {
 	}
 	if !strings.Contains(got, "x") || !strings.Contains(got, "y") {
 		t.Errorf("expected x and y in fallback text output, got: %q", got)
+	}
+}
+
+func TestPrint_Table_PointerToSlice(t *testing.T) {
+	rows := []testRow{
+		{Name: "a", Value: 1},
+		{Name: "b", Value: 2},
+	}
+	got, err := captureStdout(t, func() error {
+		return output.Print(&rows, output.FormatTable)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "NAME") || !strings.Contains(got, "a") || !strings.Contains(got, "b") {
+		t.Errorf("expected table with NAME header and rows a/b, got: %q", got)
+	}
+}
+
+func TestPrint_Text_SliceWithUnmarshalableElement(t *testing.T) {
+	got, err := captureStdout(t, func() error {
+		return output.Print([]interface{}{make(chan int)}, output.FormatText)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// formatValue falls back to fmt.Sprintf for chan, which produces something like "0xc..."
+	if strings.TrimSpace(got) == "" {
+		t.Error("expected non-empty output for chan element")
 	}
 }
 

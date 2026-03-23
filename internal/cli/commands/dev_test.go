@@ -1,0 +1,506 @@
+package commands
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
+	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+)
+
+func TestDevCmdHasSubcommands(t *testing.T) {
+	cmd := NewDevCmd()
+
+	want := map[string]bool{
+		"status":    false,
+		"functions": false,
+		"runs":      false,
+		"send":      false,
+		"events":    false,
+		"invoke":    false,
+	}
+
+	for _, sub := range cmd.Commands() {
+		name := sub.Name()
+		if _, ok := want[name]; ok {
+			want[name] = true
+		}
+	}
+
+	for name, found := range want {
+		if !found {
+			t.Errorf("dev command missing subcommand %q", name)
+		}
+	}
+}
+
+func TestDevSendRequiresArg(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+	state.DevServer = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"send"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no args provided to dev send")
+	}
+}
+
+func TestDevSendInvalidData(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+	state.DevServer = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"send", "test/event", "--data", "not-json"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid JSON data")
+	}
+	if !strings.Contains(err.Error(), "invalid --data JSON") {
+		t.Errorf("expected error about invalid JSON, got: %v", err)
+	}
+}
+
+func TestDevInvokeRequiresArg(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+	state.DevServer = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"invoke"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no args provided to dev invoke")
+	}
+}
+
+func TestDevInvokeInvalidData(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+	state.DevServer = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"invoke", "my-func", "--data", "not-json"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid JSON data")
+	}
+	if !strings.Contains(err.Error(), "invalid --data JSON") {
+		t.Errorf("expected error about invalid JSON, got: %v", err)
+	}
+}
+
+func TestDevRunsInvalidSince(t *testing.T) {
+	state.Config = &config.Config{}
+	state.Output = "json"
+	state.DevServer = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"runs", "--since", "notaduration"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --since duration")
+	}
+	if !strings.Contains(err.Error(), "invalid --since duration") {
+		t.Errorf("expected error about invalid duration, got: %v", err)
+	}
+}
+
+func TestNewDevClient(t *testing.T) {
+	state.DevServer = "http://localhost:8288"
+	state.AppVersion = "v1.0.0"
+
+	client := newDevClient()
+	if client == nil {
+		t.Fatal("expected non-nil client from newDevClient()")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// New integration tests using mock server
+// ---------------------------------------------------------------------------
+
+func TestDevStatus_Online(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/dev": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"version":"0.1.0","functions":[{"id":"fn1","name":"test-fn"}]}`))
+		},
+	})
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"status"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if result["status"] != "online" {
+		t.Errorf("expected status %q, got %q", "online", result["status"])
+	}
+	if result["version"] != "0.1.0" {
+		t.Errorf("expected version %q, got %q", "0.1.0", result["version"])
+	}
+	// functions count is returned as float64 from JSON unmarshalling
+	if fns, ok := result["functions"].(float64); !ok || fns != 1 {
+		t.Errorf("expected functions count 1, got %v", result["functions"])
+	}
+}
+
+func TestDevStatus_Offline(t *testing.T) {
+	srv := newMockServer(t, nil, nil)
+	closedURL := srv.URL
+	srv.Close() // close immediately so the server is unreachable
+
+	state.DevServer = closedURL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"status"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if result["status"] != "offline" {
+		t.Errorf("expected status %q, got %q", "offline", result["status"])
+	}
+}
+
+func TestDevFunctions(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListFunctions": `{"data":{"functions":[{"id":"fn-1","name":"My Function","slug":"my-func","triggers":[{"type":"event","value":"test/event"}],"app":{"name":"test-app"}}]}}`,
+	}, nil)
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"functions"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON array output: %v\nraw output: %s", err, got)
+	}
+
+	if len(result) == 0 {
+		t.Fatal("expected at least one function in output")
+	}
+	if result[0]["name"] != "My Function" {
+		t.Errorf("expected first function name %q, got %q", "My Function", result[0]["name"])
+	}
+}
+
+func TestDevRuns_Success(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"DevRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}}}],"totalCount":1}}}`,
+	}, nil)
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"runs", "--since", "1h"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, `"run-1"`) {
+		t.Errorf("expected output to contain %q, got: %s", "run-1", got)
+	}
+}
+
+func TestDevSend_Success(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/e/*": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"ids":["evt-id-1"],"status":200}`))
+		},
+	})
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"send", "test/event", "--data", `{"key":"val"}`})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, `"event_ids"`) {
+		t.Errorf("expected output to contain event_ids, got: %s", got)
+	}
+	if !strings.Contains(got, `"evt-id-1"`) {
+		t.Errorf("expected output to contain %q, got: %s", "evt-id-1", got)
+	}
+}
+
+func TestDevInvoke_Success(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/invoke/*": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":"run-id-1","status":200}`))
+		},
+	})
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"invoke", "my-func", "--data", `{"key":"val"}`})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, `"event_id"`) {
+		t.Errorf("expected output to contain event_id, got: %s", got)
+	}
+	if !strings.Contains(got, `"run-id-1"`) {
+		t.Errorf("expected output to contain %q, got: %s", "run-id-1", got)
+	}
+}
+
+func TestDevInvoke_NoData(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/invoke/*": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":"run-id-1","status":200}`))
+		},
+	})
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"invoke", "my-func"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, `"event_id"`) {
+		t.Errorf("expected output to contain event_id, got: %s", got)
+	}
+	if !strings.Contains(got, `"run-id-1"`) {
+		t.Errorf("expected output to contain %q, got: %s", "run-id-1", got)
+	}
+}
+
+func TestDevEvents_Success(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListDevEvents": `{"data":{"events":[{"id":"evt-1","name":"test/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":1},{"id":"evt-2","name":"other/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":0}]}}`,
+	}, nil)
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"events"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, `"evt-1"`) {
+		t.Errorf("expected output to contain %q, got: %s", "evt-1", got)
+	}
+	if !strings.Contains(got, `"evt-2"`) {
+		t.Errorf("expected output to contain %q, got: %s", "evt-2", got)
+	}
+}
+
+func TestDevEvents_NameFilter(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListDevEvents": `{"data":{"events":[{"id":"evt-1","name":"test/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":1},{"id":"evt-2","name":"other/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":0}]}}`,
+	}, nil)
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"events", "--name", "test/event"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, `"evt-1"`) {
+		t.Errorf("expected output to contain %q, got: %s", "evt-1", got)
+	}
+	if strings.Contains(got, `"evt-2"`) {
+		t.Errorf("expected output NOT to contain %q, got: %s", "evt-2", got)
+	}
+}
+
+func TestDevEvents_LimitFilter(t *testing.T) {
+	// Build 5 events for the mock response.
+	events := make([]map[string]interface{}, 5)
+	for i := 0; i < 5; i++ {
+		events[i] = map[string]interface{}{
+			"id":        fmt.Sprintf("evt-%d", i+1),
+			"name":      fmt.Sprintf("event/%d", i+1),
+			"createdAt": "2024-01-01T00:00:00Z",
+			"status":    "received",
+			"totalRuns": 0,
+		}
+	}
+	eventsJSON, _ := json.Marshal(events)
+	gqlResp := fmt.Sprintf(`{"data":{"events":%s}}`, string(eventsJSON))
+
+	srv := newMockServer(t, map[string]string{
+		"ListDevEvents": gqlResp,
+	}, nil)
+	defer srv.Close()
+
+	state.DevServer = srv.URL
+	state.Output = "json"
+	state.AppVersion = "test"
+	state.Config = &config.Config{}
+
+	cmd := NewDevCmd()
+	cmd.SetArgs([]string{"events", "--limit", "2"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON array output: %v\nraw output: %s", err, got)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("expected 2 events after --limit 2, got %d", len(result))
+	}
+}

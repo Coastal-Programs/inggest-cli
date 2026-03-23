@@ -2,15 +2,12 @@
 set -euo pipefail
 
 VERSION="${1:-dev}"
-BINARY="xero"
-CMD="./cmd/xero"
+BINARY="inngest"
+CMD="./cmd/inngest"
 DIST="./dist"
 
-# CLIENT_ID and PROXY_URL are injected from CI secrets (GitHub Actions env vars)
 LDFLAGS="-s -w \
-  -X main.version=${VERSION} \
-  -X main.defaultClientID=${CLIENT_ID:-} \
-  -X main.proxyURL=${PROXY_URL:-}"
+  -X main.version=${VERSION}"
 
 mkdir -p "${DIST}"
 
@@ -29,9 +26,9 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 
   if [ "${GOOS}" = "windows" ]; then
     OUTPUT="${OUTPUT}.exe"
-    ARCHIVE="${DIST}/${BINARY}-${VERSION}-${GOOS}-${GOARCH}.zip"
+    ARCHIVE="${DIST}/inngest-cli-${VERSION}-${GOOS}-${GOARCH}.zip"
   else
-    ARCHIVE="${DIST}/${BINARY}-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+    ARCHIVE="${DIST}/inngest-cli-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
   fi
 
   echo "Building ${GOOS}/${GOARCH}..."

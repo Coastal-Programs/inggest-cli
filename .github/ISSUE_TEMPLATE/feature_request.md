@@ -12,5 +12,5 @@ What problem does this solve?
 
 **Example command**
 ```bash
-xero <proposed command>
+inngest <proposed command>
 ```

@@ -1,279 +1,276 @@
 <div align="center">
-  <img src="internal/auth/assets/logo.png" alt="Zeus CLI" width="110" />
-  <h1>Zeus CLI</h1>
-  <p><strong>A fast, scriptable Xero Accounting CLI built for AI agents and data pipelines.</strong></p>
+<pre>
+██╗███╗   ██╗███╗   ██╗ ██████╗ ███████╗███████╗████████╗     ██████╗██╗     ██╗
+██║████╗  ██║████╗  ██║██╔════╝ ██╔════╝██╔════╝╚══██╔══╝    ██╔════╝██║     ██║
+██║██╔██╗ ██║██╔██╗ ██║██║  ███╗█████╗  ███████╗   ██║       ██║     ██║     ██║
+██║██║╚██╗██║██║╚██╗██║██║   ██║██╔══╝  ╚════██║   ██║       ██║     ██║     ██║
+██║██║ ╚████║██║ ╚████║╚██████╔╝███████╗███████║   ██║       ╚██████╗███████╗██║
+╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚══════╝   ╚═╝        ╚═════╝╚══════╝╚═╝
+</pre>
 
-  [![GitHub Release](https://img.shields.io/github/v/release/jakeschepis/zeus-cli?style=flat-square&color=gold)](https://github.com/jakeschepis/zeus-cli/releases)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
-  [![Go](https://img.shields.io/github/go-mod/go-version/jakeschepis/zeus-cli?style=flat-square)](go.mod)
+<p align="center">
+  <a href="https://go.dev/">
+    <img src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8.svg" alt="Go Version">
+  </a>
+  <a href="https://github.com/Coastal-Programs/inggest-cli/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+  </a>
+</p>
 </div>
 
----
+**IMPORTANT NOTICE:**
 
-Zeus CLI is a command-line tool for the [Xero Accounting API](https://developer.xero.com/documentation/api/accounting/overview). Every command returns structured JSON — purpose-built for AI assistants, shell scripts, and financial data pipelines.
+This is an independent, unofficial command-line tool for working with Inngest's API.
+This project is not affiliated with, endorsed by, or sponsored by Inngest, Inc.
+"Inngest" is a registered trademark of Inngest, Inc.
 
-## Features
+> Inngest CLI for AI Agents & Automation -- a single Go binary, no runtime dependencies.
 
-- **OAuth 2.0 PKCE** — browser-based login with no manual token handling
-- **Multi-org support** — manage multiple Xero organisations; switch with `--org` or query all with `--all-orgs`
-- **Auto-pagination** — fetches every record automatically, no page loops needed
-- **JSON by default** — clean, structured output; use `--output table` or `--output text` for humans
-- **Rate limit aware** — reads Xero's `Retry-After` header on 429s and retries automatically
+A command-line interface for monitoring, debugging, and managing [Inngest](https://www.inngest.com) functions from the terminal. Built in Go with Cobra, optimized for AI coding assistants, shell scripts, and CI/CD pipelines.
 
-## Prerequisites
-
-1. Create a **Web App** at [developer.xero.com/myapps](https://developer.xero.com/myapps)
-2. Set the OAuth 2.0 redirect URI to `http://localhost:8765/callback`
-3. Copy your **Client ID** and **Client Secret**
-
-## Installation
-
-**Requires Go 1.23+**
-
-```bash
-go install github.com/jakeschepis/zeus-cli/cmd/xero@latest
-```
-
-Or build from source:
-
-```bash
-git clone https://github.com/jakeschepis/zeus-cli
-cd zeus-cli
-make install
-```
+**Key Features:**
+- **Single binary**: zero runtime dependencies, instant startup
+- **AI-first design**: JSON output by default, structured errors, clean exit codes
+- **Non-interactive**: perfect for scripts and automation
+- **Flexible output**: JSON, text, or table formats
+- **Cloud + local**: works with both Inngest Cloud and the local dev server
+- **Real-time monitoring**: watch runs, compute metrics, check health
+- **Near-zero supply chain risk**: 2 Go dependencies (cobra, pflag)
 
 ## Quick Start
 
+### Installation
+
+**Option 1: Go install**
 ```bash
-# 1. Store your Xero app credentials
-xero config set client_id     YOUR_CLIENT_ID
-xero config set client_secret YOUR_CLIENT_SECRET
+go install github.com/Coastal-Programs/inggest-cli/cmd/inngest@latest
+```
 
-# 2. Authenticate (opens browser)
-xero auth login
+Requires Go 1.25+.
 
-# 3. Start querying
-xero invoices list --status AUTHORISED
-xero reports profit-loss --from 2024-01-01 --to 2024-12-31
+**Option 2: Build from source**
+```bash
+git clone https://github.com/Coastal-Programs/inggest-cli.git
+cd inggest-cli
+make build      # → ./build/inngest
+make install    # → $GOPATH/bin/inngest
+```
+
+### Setup
+
+```bash
+# Authenticate with your signing key
+inngest auth login
+
+# Check auth status
+inngest auth status
+
+# List your functions
+inngest functions list
+
+# See recent runs
+inngest runs list --since 1h
 ```
 
 ## Commands
 
-### Auth
+### Authentication
 
 ```bash
-xero auth login          # Authenticate via browser (PKCE flow)
-xero auth logout         # Clear stored tokens
-xero auth status         # Show authentication status
-xero auth refresh        # Manually refresh access token
+# Log in with signing key (interactive prompt or --signing-key flag)
+inngest auth login
+
+# Check current auth status
+inngest auth status
+
+# Clear stored credentials
+inngest auth logout
 ```
 
-### Organisations
+### Functions
+
+| Command | Description |
+|---------|-------------|
+| `inngest functions list` | List all functions with triggers and config |
+| `inngest functions get <slug>` | Get detailed function info by slug |
+| `inngest functions config <slug>` | Show function configuration (concurrency, throttle, retry, etc.) |
 
 ```bash
-xero orgs list                  # List all connected organisations
-xero orgs use <name-or-id>      # Set the active organisation
-xero orgs sync                  # Re-fetch organisations from Xero
+# Filter by app
+inngest functions list --app my-app
+
+# Table view
+inngest functions list --output table
+
+# Full config details
+inngest functions config my-app-process-order
 ```
 
-### Invoices
+### Runs
+
+| Command | Description |
+|---------|-------------|
+| `inngest runs list` | List recent function runs |
+| `inngest runs get <run-id>` | Get full run details including trace |
+| `inngest runs cancel <run-id>` | Cancel a running function |
+| `inngest runs replay <run-id>` | Replay a function run |
+| `inngest runs watch` | Watch for new runs in real-time |
 
 ```bash
-xero invoices list              # List invoices
-xero invoices get <id>          # Get invoice by ID
-xero invoices create            # Create an invoice
-xero invoices void <id>         # Void an invoice
-xero invoices email <id>        # Email invoice to contact
+# Filter by status and time range
+inngest runs list --status FAILED --since 1h --limit 50
+
+# Get full trace for a run
+inngest runs get 01HXYZ... --output text
+
+# Watch runs live
+inngest runs watch --function my-func --interval 5s
 ```
 
-Flags: `--status`, `--type`, `--from`, `--to`, `--page`, `--org`, `--all-orgs`
+### Events
 
-### Contacts
+| Command | Description |
+|---------|-------------|
+| `inngest events send <event-name>` | Send an event to Inngest Cloud |
+| `inngest events get <event-id>` | Get event details and triggered runs |
+| `inngest events list` | List recent events |
+| `inngest events types` | List unique event names seen recently |
 
 ```bash
-xero contacts list              # List contacts
-xero contacts get <id>          # Get contact by ID
-xero contacts create            # Create a contact
-xero contacts update <id>       # Update a contact
+# Send an event with data
+inngest events send test/user.signup --data '{"userId": "123"}'
+
+# Pipe data from stdin
+echo '{"userId": "456"}' | inngest events send test/user.signup
+
+# List recent events of a specific type
+inngest events list --name user.signup --since 24h
 ```
 
-### Accounts
+### Environments
+
+| Command | Description |
+|---------|-------------|
+| `inngest env list` | List all environments (apps) |
+| `inngest env use <name>` | Set the active environment |
+| `inngest env get <name-or-id>` | Get detailed environment info |
+
+### Dev Server
+
+| Command | Description |
+|---------|-------------|
+| `inngest dev status` | Check if the local dev server is running |
+| `inngest dev functions` | List functions registered with the dev server |
+| `inngest dev runs` | List recent function runs from the dev server |
+| `inngest dev send <event-name>` | Send an event to the dev server |
+| `inngest dev invoke <function-slug>` | Invoke a function on the dev server |
+| `inngest dev events` | List recent events from the dev server |
 
 ```bash
-xero accounts list              # List chart of accounts
-xero accounts get <id-or-code>  # Get an account
+# Check dev server status
+inngest dev status
+
+# Send a test event locally
+inngest dev send test/user.signup --data '{"userId": "123"}'
+
+# Invoke a function directly
+inngest dev invoke my-app-process-order --data '{"orderId": "abc"}'
 ```
 
-### Payments
+The dev server runs at `http://localhost:8288` by default. Override with `--dev-url`.
+
+### Monitoring
+
+| Command | Description |
+|---------|-------------|
+| `inngest health` | Run connectivity and configuration health checks |
+| `inngest metrics` | Show run metrics and success/failure rates |
+| `inngest backlog` | Show currently queued and running runs per function |
 
 ```bash
-xero payments list              # List payments
-xero payments get <id>          # Get a payment
-xero payments create            # Apply a payment to an invoice
-```
+# Health check all systems
+inngest health
 
-### Credit Notes
+# Metrics for the last hour
+inngest metrics --since 1h
 
-```bash
-xero credit-notes list              # List credit notes
-xero credit-notes get <id>          # Get a credit note by ID
-xero credit-notes create            # Create a credit note
-xero credit-notes apply             # Apply a credit note against an invoice
-```
-
-Flags: `--status`, `--type`, `--page`, `--org`, `--all-orgs`
-
-### Tracking Categories
-
-```bash
-xero tracking list                  # List tracking categories
-xero tracking get <id>              # Get a tracking category
-xero tracking create                # Create a tracking category
-xero tracking option add <id>       # Add an option to a category
-```
-
-### Manual Journals
-
-```bash
-xero journals list                  # List manual journals
-xero journals get <id>              # Get a manual journal
-xero journals create                # Create a manual journal
-```
-
-Flags: `--from`, `--to`, `--page`
-
-### Journal Ledger
-
-```bash
-xero journal-ledger list            # List journal ledger entries (audit trail)
-```
-
-Flags: `--from`, `--to`, `--offset` (0 = fetch all)
-
-### Purchase Orders
-
-```bash
-xero po list                        # List purchase orders
-xero po get <id>                    # Get a purchase order
-xero po create                      # Create a purchase order
-```
-
-Flags: `--status`, `--page`, `--org`, `--all-orgs`
-
-### Budgets
-
-```bash
-xero budgets list                   # List budgets
-xero budgets get <id>               # Get a budget by ID
-```
-
-### Overpayments & Prepayments
-
-```bash
-xero overpayments list              # List overpayments
-xero overpayments apply             # Apply an overpayment against an invoice
-xero prepayments list               # List prepayments
-xero prepayments apply              # Apply a prepayment against an invoice
-```
-
-Flags: `--page`, `--org`, `--all-orgs`
-
-### Quotes
-
-```bash
-xero quotes list                    # List quotes
-xero quotes get <id>                # Get a quote by ID
-xero quotes create                  # Create a quote
-xero quotes convert <id>            # Convert a quote to an invoice
-```
-
-Flags: `--status`, `--page`, `--org`, `--all-orgs`
-
-### Tax Rates
-
-```bash
-xero tax-rates list                 # List tax rates (reference data)
-```
-
-### Reports
-
-```bash
-xero reports profit-loss            # Profit & Loss
-xero reports balance-sheet          # Balance Sheet
-xero reports trial-balance          # Trial Balance
-xero reports aged-receivables       # Aged Receivables
-xero reports aged-payables          # Aged Payables
-xero reports cash-flow              # Cash Flow Summary
-xero reports budget-variance        # Budget Variance
-xero reports account-transactions   # Account Transactions
-xero reports executive-summary      # Executive Summary
-xero reports bank-summary           # Bank Summary
-```
-
-Flags: `--from`, `--to`, `--org`, `--all-orgs`
-
-The `profit-loss` report also supports `--tracking-category` and `--tracking-option` to filter by tracking segment.
-
-### Bank
-
-```bash
-xero bank accounts              # List bank accounts
-xero bank transactions          # List bank transactions
-xero bank get <id>              # Get a bank transaction
-```
-
-### Items
-
-```bash
-xero items list                 # List inventory items
-xero items get <id-or-code>     # Get an item
-xero items create               # Create an item
+# See what's queued
+inngest backlog --output table
 ```
 
 ### Config
 
-```bash
-xero config get <key>           # Get a config value
-xero config set <key> <value>   # Set a config value
-xero config show                # Show all config (secrets redacted)
-```
-
-## Multi-Org Usage
-
-Zeus CLI is designed for managing multiple Xero organisations — connect them all in a single login and query any of them on demand:
-
-```bash
-# See all connected orgs
-xero orgs list
-
-# Target a specific org by name (partial match)
-xero invoices list --org "Retirement Agency A"
-xero reports profit-loss --org "Agency B" --from 2024-01-01 --to 2024-12-31
-
-# Run the same command across every org at once
-xero reports balance-sheet --all-orgs
-xero invoices list --all-orgs --status AUTHORISED
-```
+| Command | Description |
+|---------|-------------|
+| `inngest config show` | Show all configuration values |
+| `inngest config get <key>` | Get a single configuration value |
+| `inngest config set <key> <value>` | Set a configuration value |
+| `inngest config path` | Print the config file path |
 
 ## Global Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--org` | active org | Target org by name or ID |
+| `--env`, `-e` | `production` | Target environment by name or ID |
 | `--output`, `-o` | `json` | Output format: `json`, `text`, `table` |
+| `--dev` | `false` | Route requests to local dev server |
+| `--api-url` | | Override API base URL (for self-hosted Inngest) |
+| `--dev-url` | | Override dev server URL |
+
+## Output Formats
+
+All commands support three output formats via `--output`:
+
+- **json** (default) — structured JSON, ideal for piping to `jq` or parsing in scripts
+- **text** — human-readable key-value output
+- **table** — tabular output for terminal viewing
+
+```bash
+inngest functions list --output table
+inngest runs list -o json | jq '.[].status'
+```
 
 ## Configuration
 
-Config is stored at `~/.config/xero/config.json` with `0600` permissions. Override the path with the `XERO_CONFIG` environment variable (must be an absolute path ending in `.json`).
+Config is stored at `~/.config/inngest/cli.json` (0600 permissions).
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `INNGEST_SIGNING_KEY` | Signing key for Inngest Cloud API access |
+| `INNGEST_EVENT_KEY` | Event key for sending events |
+| `INNGEST_CLI_CONFIG` | Override config file path |
+
+Environment variables take precedence over config file values.
 
 ```bash
-xero config show    # View all settings (secrets redacted)
+# View all settings and their sources
+inngest config show
+
+# Set a value
+inngest config set active_env staging
 ```
 
-## Rate Limits
+## Architecture
 
-Xero enforces **60 calls/minute per org** and **5,000 calls/day**. Zeus CLI reads the `Retry-After` header on `429 Too Many Requests` responses and retries automatically — no manual intervention needed.
+Built in Go with a focus on simplicity, reliability, and minimal dependencies.
+
+- **CLI framework**: [Cobra](https://github.com/spf13/cobra) for command parsing and flag handling
+- **HTTP client**: Raw `net/http` — no SDK dependency
+- **API**: GraphQL for queries (functions, runs, environments), REST for events
+- **Config**: Environment variables + JSON config file
+- **Output**: JSON / text / table via `pkg/output.Printer`
+- **Dependencies**: 2 Go modules (cobra, pflag) — near-zero supply chain risk
+
+## Contributing
+
+```bash
+make check      # fmt + vet + test — run before every commit
+make test       # run all tests with race detector
+make build      # build binary to ./build/inngest
+```
 
 ## License
 
-[MIT](LICENSE) © 2026 Jake Schepis
+[MIT](LICENSE)

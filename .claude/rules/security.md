@@ -1,20 +1,14 @@
 # Security Rules
 
-## Tokens and Secrets
-- Never log or print raw tokens — use `config.Redacted()` or the `redact()` helper
-- `client_secret` must NEVER appear in the CLI binary, config file, or logs
-- It lives exclusively in the Cloudflare Worker as a Cloudflare secret
+## Keys and Secrets
+- Never log or print raw signing keys or event keys — use redaction helpers
+- Signing key (`INNGEST_SIGNING_KEY`) and event key (`INNGEST_EVENT_KEY`) can come from env vars or config file
+- Env vars take precedence over config file values
 
 ## Config File
 - Always written with `0600` permissions — do not change this
-- `XERO_CONFIG` env var is validated: must be absolute path, end in `.json`, no `..` — do not relax this validation
-
-## Auth Proxy
-- `/init-session` is protected by `ZEUS_ADMIN_SECRET` — only the Zeus Electron app holds this
-- `instance_token` must be validated on every `/refresh` call — proves the CLI was authorised through Zeus
-- Session tokens are single-use — consumed (deleted from KV) on first use
-- Admin secret comparison uses `crypto.subtle.timingSafeEqual` — never use `===` for secret comparison
+- `INNGEST_CLI_CONFIG` env var overrides the default path
 
 ## HTTP
 - All HTTP clients must have explicit timeouts — no bare `http.DefaultClient`
-- Error response bodies are truncated to 300 chars before logging — never log full upstream error bodies
+- Error response bodies are truncated before logging — never log full upstream error bodies

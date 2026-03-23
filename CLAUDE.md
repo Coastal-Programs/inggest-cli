@@ -1,41 +1,40 @@
-# Zeus CLI
+# Inngest CLI
 
-Go CLI for the Xero Accounting API. Data layer for the Zeus Electron app.
-Serves Australian retirement agencies — each agency is a separate Xero org.
+Go CLI for the Inngest platform. Monitor, debug, and manage Inngest functions from the terminal.
+Built for AI agents, shell scripts, and CI/CD pipelines.
 
-- **Module:** `github.com/jakeschepis/zeus-cli`
-- **Binary:** `xero`
-- **Config:** `~/.config/xero/config.json`
+- **Module:** `github.com/Coastal-Programs/inggest-cli`
+- **Binary:** `inngest`
+- **Config:** `~/.config/inngest/cli.json`
 - **Only external dep:** `github.com/spf13/cobra v1.8.1` — prefer stdlib for everything else
 
 ## Commands
 
 ```bash
-make build      # → ./build/xero
+make build      # → ./build/inngest
 make install    # → $GOPATH/bin
 make check      # fmt + vet + test — run before every commit
 make clean      # remove build/dist artifacts
 ```
 
 ```bash
-./build/xero auth status
-./build/xero orgs list
-./build/xero invoices list --status AUTHORISED
+./build/inngest auth status
+./build/inngest functions list
+./build/inngest runs list --status COMPLETED --since 1h
+./build/inngest events send test/user.signup --data '{"userId": "123"}'
+./build/inngest dev status
 ```
 
 ## Structure
 
 ```
-cmd/xero/main.go                  # entry point, ldflags: version, clientID, proxyURL
-internal/cli/root.go              # root Cobra command, --org and --output flags
-internal/cli/commands/            # one file per command group
-internal/xero/                    # Xero API client + resource methods
-internal/auth/oauth.go            # OAuth 2.0 PKCE + proxy-aware token exchange
-internal/auth/assets/logo.png     # embedded Zeus logo (callback page + favicon)
-internal/common/config/config.go  # config load/save, tenant resolution
-pkg/output/output.go              # JSON / text / table formatter
-worker/src/index.js               # Cloudflare Worker — auth proxy
-scripts/release.sh                # cross-platform release builder
+cmd/inngest/main.go                  # entry point, ldflags: version
+internal/cli/root.go                 # root Cobra command, --env/--output/--dev flags
+internal/cli/commands/               # one file per command group
+internal/inngest/                    # Inngest API client (GraphQL + REST + dev server)
+internal/common/config/config.go     # config load/save, env var fallbacks
+pkg/output/output.go                 # JSON / text / table formatter
+scripts/release.sh                   # cross-platform release builder
 ```
 
 ## Detailed Rules
@@ -43,4 +42,7 @@ scripts/release.sh                # cross-platform release builder
 @.claude/rules/go.md
 @.claude/rules/security.md
 @.claude/rules/release.md
-@.claude/rules/worker.md
+
+## Environment
+
+- Platform: darwin

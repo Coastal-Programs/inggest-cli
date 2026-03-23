@@ -1,303 +1,125 @@
-# Zeus CLI — Architecture
+# Inngest CLI — Architecture
 
 ## Overview
 
-Zeus CLI is a command-line tool that provides structured access to the Xero Accounting API. It is the data layer for the Zeus Electron application — it fetches financial data from Xero and returns clean JSON that Zeus uses to power its AI chat interface.
-
-It is **not a standalone public tool**. Every authentication attempt must be initiated through the Zeus application.
-
----
-
-## System Components
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Zeus App (Electron)                    │
-│   - AI chat interface                                       │
-│   - Initiates Xero authentication                          │
-│   - Spawns CLI commands and parses their JSON output        │
-└────────────────────────┬────────────────────────────────────┘
-                         │ spawns process + sets env vars
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Zeus CLI  (xero binary)                  │
-│   - All commands return structured JSON                     │
-│   - Reads config from ~/.config/xero/config.json           │
-│   - Never holds the Xero client_secret                      │
-└────────────────────────┬────────────────────────────────────┘
-                         │ token exchange + refresh
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Auth Proxy  (Cloudflare Worker)                │
-│   - Only place the Xero client_secret lives                 │
-│   - Validates session tokens issued by Zeus app             │
-│   - Brokers all OAuth communication with Xero               │
-│   - Stores session + instance tokens in Cloudflare KV      │
-└────────────────────────┬────────────────────────────────────┘
-                         │ authenticated API calls
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Xero Accounting API                       │
-│   - api.xero.com/api.xro/2.0                               │
-│   - One access token, many organisations (multi-tenant)     │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Authentication Flow
-
-Zeus uses **OAuth 2.0 PKCE** with a proxy layer so the `client_secret` never touches a user's machine.
-
-### First-time login
-
-```
-Zeus App                  CLI                  Auth Proxy              Xero
-   │                       │                       │                     │
-   │─── POST /init-session ──────────────────────► │                     │
-   │    (Authorization: Bearer ZEUS_ADMIN_SECRET)  │                     │
-   │                       │                       │                     │
-   │◄── { session_token } ─────────────────────── │                     │
-   │    (one-time, 5 min TTL, stored in KV)        │                     │
-   │                       │                       │                     │
-   │── spawn CLI with ────►│                       │                     │
-   │   ZEUS_SESSION_TOKEN  │                       │                     │
-   │   env var             │                       │                     │
-   │                       │── open browser ──────────────────────────► │
-   │                       │   (PKCE challenge)    │                     │
-   │                       │                       │                     │
-   │                       │◄─ auth code via ─────────────────────────── │
-   │                       │   localhost:8765      │                     │
-   │                       │                       │                     │
-   │                       │── POST /token ───────►│                     │
-   │                       │   session_token       │                     │
-   │                       │   code                │── POST /token ────► │
-   │                       │   code_verifier       │   + client_secret   │
-   │                       │                       │                     │
-   │                       │                       │◄─ access_token ──── │
-   │                       │                       │   refresh_token     │
-   │                       │                       │                     │
-   │                       │◄─ access_token ───── │                     │
-   │                       │   refresh_token       │                     │
-   │                       │   instance_token      │  (KV: instance      │
-   │                       │                       │   token stored,     │
-   │                       │                       │   90 day TTL)       │
-   │                       │                       │                     │
-   │                       │── save to ────────────                      │
-   │                       │   config.json         │                     │
-```
-
-### Token refresh (automatic, background)
-
-```
-CLI                          Auth Proxy              Xero
- │                               │                     │
- │── POST /refresh ─────────────►│                     │
- │   instance_token              │                     │
- │   refresh_token               │── POST /token ────► │
- │                               │   + client_secret   │
- │                               │                     │
- │◄─ new access_token ──────────│◄─ new access_token ─│
-```
-
-### What blocks unauthorised access
-
-| Attempt | Result |
-|---|---|
-| Run `xero auth login` directly in terminal | Error: must be started from Zeus app |
-| Hit `/init-session` without `ZEUS_ADMIN_SECRET` | 401 Unauthorized |
-| Hit `/token` without a valid session token | 401 Unauthorized |
-| Hit `/token` with a session token twice | 401 — token consumed on first use |
-| Hit `/refresh` without a valid instance token | 401 Unauthorized |
-| Session token not used within 5 minutes | 401 — expired in KV |
+Inngest CLI is a command-line tool for monitoring, debugging, and managing Inngest functions. It communicates with both the Inngest Cloud API and the local dev server, returning structured output (JSON, text, or table) suitable for AI agents, shell scripts, and CI/CD pipelines.
 
 ---
 
 ## Project Structure
 
 ```
-zeus-cli/
+inngest-cli/
 │
-├── cmd/xero/
-│   └── main.go                  # Entry point. Injects version, clientID, proxyURL
-│                                # via ldflags at build time.
+├── cmd/inngest/
+│   └── main.go                  # Entry point. Injects version via ldflags.
 │
 ├── internal/
-│   ├── auth/
-│   │   ├── oauth.go             # OAuth 2.0 PKCE flow, proxy-aware token exchange
-│   │   └── assets/
-│   │       └── logo.png         # Zeus logo — embedded into binary for callback page
-│   │
 │   ├── cli/
-│   │   ├── root.go              # Root Cobra command, global --org and --output flags
+│   │   ├── root.go              # Root Cobra command, global --env/--output/--dev flags
 │   │   └── commands/
-│   │       ├── auth.go          # xero auth login/logout/status/refresh
-│   │       ├── orgs.go          # xero orgs list/use/sync
-│   │       ├── invoices.go      # xero invoices list/get/create/void/email
-│   │       ├── contacts.go      # xero contacts list/get/create/update
-│   │       ├── accounts.go      # xero accounts list/get
-│   │       ├── payments.go      # xero payments list/get/create
-│   │       ├── reports.go       # xero reports profit-loss/balance-sheet/etc
-│   │       ├── bank.go          # xero bank accounts/transactions/get
-│   │       ├── items.go         # xero items list/get/create
-│   │       ├── config.go        # xero config get/set/show
-│   │       └── version.go       # xero version
+│   │       ├── auth.go          # inngest auth login/logout/status
+│   │       ├── functions.go     # inngest functions list/get/config
+│   │       ├── runs.go          # inngest runs list/get/cancel/replay/watch
+│   │       ├── events.go        # inngest events send/get/list/types
+│   │       ├── env.go           # inngest env list/use/get
+│   │       ├── dev.go           # inngest dev status/functions/runs/send/invoke/events
+│   │       ├── metrics.go       # inngest health/metrics/backlog
+│   │       ├── config.go        # inngest config show/get/set/path
+│   │       └── version.go       # inngest version
 │   │
-│   ├── xero/
-│   │   ├── client.go            # HTTP client with auth, User-Agent, 429 handling
-│   │   ├── invoices.go          # Invoice API methods + auto-pagination
-│   │   ├── contacts.go          # Contact API methods + auto-pagination
-│   │   ├── accounts.go          # Chart of accounts API methods
-│   │   ├── payments.go          # Payment API methods
-│   │   ├── reports.go           # Financial report API methods
-│   │   ├── bank.go              # Bank account/transaction API methods
-│   │   └── items.go             # Inventory item API methods
+│   ├── inngest/
+│   │   └── client.go            # API client — GraphQL, REST, and dev server
 │   │
 │   └── common/
 │       └── config/
-│           └── config.go        # Config load/save, tenant resolution, secret redaction
+│           └── config.go        # Config load/save, env var fallbacks
 │
 ├── pkg/
 │   └── output/
 │       └── output.go            # JSON / text / table output formatter
 │
-├── worker/
-│   ├── src/
-│   │   └── index.js             # Cloudflare Worker — auth proxy
-│   ├── wrangler.toml            # Worker config + KV namespace binding
-│   └── package.json
-│
 ├── scripts/
-│   └── release.sh               # Cross-platform release build (5 targets)
-│
-├── .github/
-│   ├── workflows/
-│   │   ├── test.yml             # CI: build + vet + test on push/PR
-│   │   └── release.yml          # CD: build + publish GitHub Release on v* tag
-│   ├── release.yml              # Auto release notes categories (PR labels)
-│   └── ISSUE_TEMPLATE/
-│       ├── bug_report.md
-│       └── feature_request.md
+│   └── release.sh               # Cross-platform release build
 │
 ├── CLAUDE.md                    # AI assistant project memory and conventions
 ├── ARCHITECTURE.md              # This file
 ├── README.md                    # Public-facing documentation
 ├── CHANGELOG.md                 # Version history
-├── Makefile                     # Build, test, release, worker targets
-├── go.mod                       # Module: github.com/jakeschepis/zeus-cli
+├── Makefile                     # Build, test, release targets
+├── go.mod                       # Module: github.com/Coastal-Programs/inggest-cli
 └── .gitignore
 ```
+
+---
+
+## API Client Architecture
+
+The API client (`internal/inngest/client.go`) supports three authentication modes:
+
+| Mode | Auth Mechanism | Used For |
+|------|---------------|----------|
+| Signing key | `Authorization: Bearer signkey-...` | GraphQL API (functions, runs, environments) and REST endpoints |
+| Event key | Included in event payload URL | Sending events to Inngest Cloud |
+| No auth | None | Local dev server (http://localhost:8288) |
+
+The `--dev` flag switches all requests to the local dev server, bypassing cloud authentication entirely.
+
+### GraphQL vs REST
+
+- **GraphQL** (`api.inngest.com/gql`) — used for querying functions, runs, environments, and metrics
+- **REST** (`api.inngest.com/v1/`) — used for sending events and certain CRUD operations
+- **Dev Server** (`localhost:8288/v0/`) — local API with its own schema
+
+---
+
+## Config System
+
+Config file: `~/.config/inngest/cli.json` (0600 permissions)
+
+### Environment Variable Fallbacks
+
+| Config Key | Env Var | Description |
+|-----------|---------|-------------|
+| `signing_key` | `INNGEST_SIGNING_KEY` | Signing key for Cloud API |
+| `event_key` | `INNGEST_EVENT_KEY` | Event key for sending events |
+| _(file path)_ | `INNGEST_CLI_CONFIG` | Override config file location |
+
+Environment variables take precedence over config file values.
+
+### Config File Shape
+
+```json
+{
+  "signing_key": "signkey-prod-...",
+  "event_key": "...",
+  "active_env": "production",
+  "dev_server_url": "http://localhost:8288"
+}
+```
+
+---
+
+## Output System
+
+The output formatter (`pkg/output/output.go`) supports three formats controlled by the `--output` / `-o` flag:
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| `json` | Structured JSON (default) | Piping to `jq`, AI agents, scripts |
+| `text` | Human-readable key-value pairs | Quick terminal inspection |
+| `table` | Tabular output with headers | Dashboard-style viewing |
+
+Every command calls `output.Print(data, format)` — format is never hard-coded inside commands. Errors always go to stderr via `output.PrintError()`.
 
 ---
 
 ## Technology Stack
 
 | Layer | Technology | Why |
-|---|---|---|
-| CLI language | Go 1.23 | Fast binary, easy cross-compilation, strong stdlib |
-| CLI framework | Cobra | Standard Go CLI framework, subcommand support |
-| Auth proxy | Cloudflare Workers | Edge compute, free tier, no server to manage |
-| Token storage | Cloudflare KV | Serverless key-value with TTL, built into Workers |
-| Xero auth | OAuth 2.0 + PKCE | Industry standard, no client_secret on device |
+|-------|-----------|-----|
+| Language | Go 1.23 | Fast binary, easy cross-compilation, strong stdlib |
+| CLI framework | Cobra v1.8.1 | Standard Go CLI framework, subcommand support |
 | Output format | JSON (default) | Machine-readable for AI agent consumption |
-| Local config | `~/.config/xero/config.json` | 0600 permissions, standard XDG location |
-| Build injection | Go ldflags | Embeds clientID + proxyURL at compile time |
-| Releases | GitHub Actions + shell script | Cross-compiles 5 targets, auto GitHub Release |
-
----
-
-## Multi-Organisation Support
-
-Each retirement agency is a separate Xero organisation. Zeus CLI connects all of them in a single login and lets you target any one — or all at once.
-
-```
-One access token
-       │
-       ├── Organisation A (Xero-Tenant-Id: aaa...)  ← active (default)
-       ├── Organisation B (Xero-Tenant-Id: bbb...)
-       └── Organisation C (Xero-Tenant-Id: ccc...)
-```
-
-Every API request sets the `Xero-Tenant-Id` header to target the right org.
-
-**Relevant flags on most commands:**
-
-| Flag | Behaviour |
-|---|---|
-| _(no flag)_ | Uses the active org |
-| `--org "Agency Name"` | Targets org by name (partial match) or ID |
-| `--all-orgs` | Runs the command across every connected org, returns combined JSON |
-
----
-
-## Local Config File
-
-Stored at `~/.config/xero/config.json` with `0600` permissions (owner read/write only).
-
-```json
-{
-  "client_id":        "...",
-  "access_token":     "...",
-  "refresh_token":    "...",
-  "token_expiry":     1234567890,
-  "instance_token":   "...",
-  "active_tenant_id": "...",
-  "tenants": [
-    { "tenant_id": "aaa...", "tenant_name": "Agency A" },
-    { "tenant_id": "bbb...", "tenant_name": "Agency B" }
-  ]
-}
-```
-
-`client_secret` is **never stored locally** — it exists only in the Cloudflare Worker.
-
----
-
-## Build & Release
-
-### Development build
-```bash
-export CLIENT_ID=your-xero-client-id
-export PROXY_URL=https://zeus-auth-proxy.curly-cherry-d5dc.workers.dev
-make build          # outputs ./build/xero
-```
-
-### Cutting a release
-```bash
-git tag -a v0.2.0 -m "Release v0.2.0"
-git push origin v0.2.0
-# GitHub Actions builds 5 platform binaries and publishes the GitHub Release
-```
-
-The `CLIENT_ID` and `PROXY_URL` are stored as GitHub Actions secrets (`XERO_CLIENT_ID`, `PROXY_URL`) and injected at build time — they are never in source code.
-
-### Release targets
-| OS | Architecture |
-|---|---|
-| macOS | amd64 (Intel), arm64 (Apple Silicon) |
-| Linux | amd64, arm64 |
-| Windows | amd64 |
-
----
-
-## Deployed Endpoints
-
-| Resource | Value |
-|---|---|
-| Worker URL | `https://zeus-auth-proxy.curly-cherry-d5dc.workers.dev` |
-| KV Namespace ID | `25d1d6f714964884ab762ba16135ee57` |
-| Cloudflare Account | `info@coastalprograms.com` |
-
----
-
-## Cloudflare Worker — Secrets Reference
-
-| Secret | Set via | Purpose |
-|---|---|---|
-| `XERO_CLIENT_ID` | `wrangler secret put` | Xero OAuth app client ID |
-| `XERO_CLIENT_SECRET` | `wrangler secret put` | Xero OAuth app client secret |
-| `ZEUS_ADMIN_SECRET` | `wrangler secret put` | Protects `/init-session` — only Zeus app holds this |
-
-| KV Namespace | Purpose |
-|---|---|
-| `SESSIONS` | Stores session tokens (5 min TTL) and instance tokens (90 day TTL) |
+| Config | `~/.config/inngest/cli.json` | Standard XDG location, 0600 permissions |
+| Build injection | Go ldflags | Embeds version at compile time |

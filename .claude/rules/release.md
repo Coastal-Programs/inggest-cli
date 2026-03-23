@@ -54,11 +54,11 @@ Example:
 This release adds budget reporting commands and improves error messages across all commands.
 
 ### Added
-- `xero reports budget-summary` — compare actuals vs budget by org
-- `xero reports budget-variance` — line-by-line variance report
+- `inngest runs replay` — replay a function run
+- `inngest backlog` — show queued and running runs per function
 
 ### Fixed
-- Auth refresh no longer silently fails when instance_token is missing
+- GraphQL cursor pagination no longer skips the last page
 ```
 
 ### Steps
@@ -70,3 +70,5 @@ This release adds budget reporting commands and improves error messages across a
 GitHub Actions extracts the CHANGELOG entry and uses it as the release description, then builds 5 platform binaries automatically.
 
 > Never push a tag without a well-written CHANGELOG entry first.
+ry first.
+try first.

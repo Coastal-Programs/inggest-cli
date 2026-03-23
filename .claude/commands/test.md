@@ -14,8 +14,7 @@ go test -race -v ./... 2>&1
 If all tests pass, report success and stop.
 
 If there are failures, parse the output and group by package:
-- `internal/auth` — OAuth flow, PKCE, proxy logic
-- `internal/xero` — API client, pagination, rate limiting
+- `internal/inngest` — API client, GraphQL, REST, dev server
 - `internal/cli/commands` — command behaviour
 - `internal/common/config` — config load/save/resolve
 - `pkg/output` — formatter output

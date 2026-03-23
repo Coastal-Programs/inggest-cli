@@ -1,8 +1,8 @@
 # Build artifacts
 /build/
 /dist/
-/xero
-/xero.exe
+/inngest
+/inngest.exe
 *.exe
 *.dll
 *.so
@@ -10,6 +10,7 @@
 
 # Test artifacts
 *.test
+cover.out
 coverage.out
 coverage.html
 
@@ -18,13 +19,8 @@ go.work
 go.work.sum
 vendor/
 
-# Worker
-worker/node_modules/
-worker/package-lock.json
-
-# Config files (may contain OAuth tokens and client secrets)
+# Config files
 config.json
-.xero.json
 *.local.json
 
 # IDE
