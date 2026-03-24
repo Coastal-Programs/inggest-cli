@@ -7,14 +7,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 const (
 	testRunID1Events    = "run-1"
 	testStatusCompleted = "COMPLETED"
 	testRunID2          = "run-2"
-	testEmptyEventsResp = `{"data": {"eventsV2": {"edges": [], "pageInfo": {"hasNextPage": false}, "totalCount": 0}}}`
+	testEmptyEventsResp = `{"data": {"events": {"data": [], "page": {"page": 1, "perPage": 20, "totalItems": 0, "totalPages": 0}}}}`
 )
 
 func TestSendEvent_Success(t *testing.T) {
@@ -205,40 +204,51 @@ func TestSendEvent_UnmarshalableEvent(t *testing.T) {
 func TestListEvents(t *testing.T) {
 	response := `{
 		"data": {
-			"eventsV2": {
-				"edges": [
+			"events": {
+				"data": [
 					{
-						"node": {
-							"id": "evt-1",
-							"name": "user/signup",
-							"occurredAt": "2025-01-01T00:00:00Z",
-							"receivedAt": "2025-01-01T00:00:01Z",
-							"raw": "{\"name\":\"user/signup\",\"data\":{}}",
-							"runs": [
-								{
-									"id": "run-1",
-									"status": "COMPLETED",
-									"function": {"name": "Send Email"}
-								}
-							]
-						},
-						"cursor": "c1"
+						"name": "user/signup",
+						"description": "User signed up",
+						"firstSeen": "2025-01-01T00:00:00Z",
+						"usage": {"total": 42},
+						"workflows": [
+							{
+								"id": "fn-1",
+								"name": "Send Email",
+								"slug": "send-email",
+								"triggers": [{"type": "event", "value": "user/signup"}],
+								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
+							}
+						],
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2025-01-01T00:00:00Z",
+								"receivedAt": "2025-01-01T00:00:01Z",
+								"name": "user/signup",
+								"event": "{\"name\":\"user/signup\",\"data\":{}}",
+								"functionRuns": [
+									{
+										"id": "run-1",
+										"status": "COMPLETED",
+										"function": {"id": "fn-1", "name": "Send Email", "slug": "send-email"}
+									}
+								]
+							}
+						]
 					},
 					{
-						"node": {
-							"id": "evt-2",
-							"name": "order/created",
-							"raw": "{\"name\":\"order/created\"}",
-							"runs": []
-						},
-						"cursor": "c2"
+						"name": "order/created",
+						"usage": {"total": 10},
+						"recent": []
 					}
 				],
-				"pageInfo": {
-					"hasNextPage": true,
-					"endCursor": "c2"
-				},
-				"totalCount": 5
+				"page": {
+					"page": 1,
+					"perPage": 20,
+					"totalItems": 2,
+					"totalPages": 1
+				}
 			}
 		}
 	}`
@@ -252,7 +262,7 @@ func TestListEvents(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	conn, err := client.ListEvents(context.Background(), ListEventsOptions{First: 2})
+	result, err := client.ListEvents(context.Background(), ListEventsOptions{RecentCount: 5})
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
@@ -261,58 +271,56 @@ func TestListEvents(t *testing.T) {
 		t.Errorf("expected query to contain 'ListEvents', got: %s", captured.Query)
 	}
 
-	if conn.TotalCount != 5 {
-		t.Errorf("expected TotalCount 5, got %d", conn.TotalCount)
+	if result.Page.TotalItems != 2 {
+		t.Errorf("expected TotalItems 2, got %d", result.Page.TotalItems)
 	}
-	if !conn.PageInfo.HasNextPage {
-		t.Error("expected HasNextPage true")
-	}
-	if conn.PageInfo.EndCursor != "c2" {
-		t.Errorf("expected EndCursor 'c2', got %q", conn.PageInfo.EndCursor)
-	}
-	if len(conn.Edges) != 2 {
-		t.Fatalf("expected 2 edges, got %d", len(conn.Edges))
+	if len(result.Data) != 2 {
+		t.Fatalf("expected 2 event types, got %d", len(result.Data))
 	}
 
-	// First event.
-	evt := conn.Edges[0].Node
-	if evt.ID != testEvtID1 {
-		t.Errorf("expected ID 'evt-1', got %q", evt.ID)
+	// First event type.
+	et := result.Data[0]
+	if et.Name != testTriggerUserSignup {
+		t.Errorf("expected Name 'user/signup', got %q", et.Name)
 	}
-	if evt.Name != testTriggerUserSignup {
-		t.Errorf("expected Name 'user/signup', got %q", evt.Name)
+	if et.Description != "User signed up" {
+		t.Errorf("expected Description 'User signed up', got %q", et.Description)
 	}
-	if evt.CreatedAt == nil {
-		t.Error("expected CreatedAt to be non-nil")
+	if et.Usage == nil || et.Usage.Total != 42 {
+		t.Errorf("expected Usage.Total 42, got %v", et.Usage)
 	}
-	if evt.ReceivedAt == nil {
-		t.Error("expected ReceivedAt to be non-nil")
+	if len(et.Workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d", len(et.Workflows))
 	}
-	if len(evt.Runs) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(evt.Runs))
+	if et.Workflows[0].Name != testSendEmail {
+		t.Errorf("expected workflow name 'Send Email', got %q", et.Workflows[0].Name)
 	}
-	if evt.Runs[0].ID != testRunID1Events {
-		t.Errorf("expected run ID 'run-1', got %q", evt.Runs[0].ID)
+	if len(et.Recent) != 1 {
+		t.Fatalf("expected 1 recent event, got %d", len(et.Recent))
 	}
-	if evt.Runs[0].Status != testStatusCompleted {
-		t.Errorf("expected run status 'COMPLETED', got %q", evt.Runs[0].Status)
+	recent := et.Recent[0]
+	if recent.ID != testEvtID1 {
+		t.Errorf("expected recent ID 'evt-1', got %q", recent.ID)
 	}
-	if evt.Runs[0].Function == nil {
-		t.Fatal("expected run function to be non-nil")
+	if recent.OccurredAt == nil {
+		t.Error("expected OccurredAt to be non-nil")
 	}
-	if evt.Runs[0].Function.Name != testSendEmail {
-		t.Errorf("expected function name 'Send Email', got %q", evt.Runs[0].Function.Name)
+	if len(recent.FunctionRuns) != 1 {
+		t.Fatalf("expected 1 function run, got %d", len(recent.FunctionRuns))
 	}
-	if conn.Edges[0].Cursor != "c1" {
-		t.Errorf("expected cursor 'c1', got %q", conn.Edges[0].Cursor)
+	if recent.FunctionRuns[0].ID != testRunID1Events {
+		t.Errorf("expected run ID 'run-1', got %q", recent.FunctionRuns[0].ID)
+	}
+	if recent.FunctionRuns[0].Status != testStatusCompleted {
+		t.Errorf("expected run status 'COMPLETED', got %q", recent.FunctionRuns[0].Status)
 	}
 
-	// Second event.
-	if conn.Edges[1].Node.ID != "evt-2" {
-		t.Errorf("expected ID 'evt-2', got %q", conn.Edges[1].Node.ID)
+	// Second event type.
+	if result.Data[1].Name != "order/created" {
+		t.Errorf("expected Name 'order/created', got %q", result.Data[1].Name)
 	}
-	if len(conn.Edges[1].Node.Runs) != 0 {
-		t.Errorf("expected 0 runs, got %d", len(conn.Edges[1].Node.Runs))
+	if len(result.Data[1].Recent) != 0 {
+		t.Errorf("expected 0 recent events, got %d", len(result.Data[1].Recent))
 	}
 }
 
@@ -327,12 +335,12 @@ func TestListEventsError(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	conn, err := client.ListEvents(context.Background(), ListEventsOptions{First: 10})
+	result, err := client.ListEvents(context.Background(), ListEventsOptions{})
 	if err == nil {
 		t.Fatal("expected error for GraphQL error response, got nil")
 	}
-	if conn != nil {
-		t.Errorf("expected nil connection, got %+v", conn)
+	if result != nil {
+		t.Errorf("expected nil result, got %+v", result)
 	}
 	if !strings.Contains(err.Error(), "unauthorized") {
 		t.Errorf("expected error to contain 'unauthorized', got: %v", err)
@@ -342,22 +350,31 @@ func TestListEventsError(t *testing.T) {
 func TestGetEvent(t *testing.T) {
 	response := `{
 		"data": {
-			"event": {
-				"id": "evt-1",
-				"name": "user/signup",
-				"occurredAt": "2025-01-01T00:00:00Z",
-				"receivedAt": "2025-01-01T00:00:01Z",
-				"raw": "{\"name\":\"user/signup\",\"data\":{\"email\":\"test@example.com\"}}",
-				"runs": [
+			"events": {
+				"data": [
 					{
-						"id": "run-1",
-						"status": "COMPLETED",
-						"function": {"name": "Send Welcome Email"}
-					},
-					{
-						"id": "run-2",
-						"status": "FAILED",
-						"function": {"name": "Create Profile"}
+						"name": "user/signup",
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2025-01-01T00:00:00Z",
+								"receivedAt": "2025-01-01T00:00:01Z",
+								"name": "user/signup",
+								"event": "{\"name\":\"user/signup\",\"data\":{\"email\":\"test@example.com\"}}",
+								"functionRuns": [
+									{
+										"id": "run-1",
+										"status": "COMPLETED",
+										"function": {"id": "fn-1", "name": "Send Welcome Email", "slug": "send-welcome-email"}
+									},
+									{
+										"id": "run-2",
+										"status": "FAILED",
+										"function": {"id": "fn-2", "name": "Create Profile", "slug": "create-profile"}
+									}
+								]
+							}
+						]
 					}
 				]
 			}
@@ -385,9 +402,6 @@ func TestGetEvent(t *testing.T) {
 	if captured.Variables == nil {
 		t.Fatal("expected variables to be non-nil")
 	}
-	if eventID, ok := captured.Variables["eventId"].(string); !ok || eventID != testEvtID1 {
-		t.Errorf("expected eventId variable 'evt-1', got %v", captured.Variables["eventId"])
-	}
 
 	// Verify response.
 	if event == nil {
@@ -399,39 +413,36 @@ func TestGetEvent(t *testing.T) {
 	if event.Name != testTriggerUserSignup {
 		t.Errorf("expected Name 'user/signup', got %q", event.Name)
 	}
-	if event.CreatedAt == nil {
-		t.Error("expected CreatedAt to be non-nil (from occurredAt)")
+	if event.OccurredAt == nil {
+		t.Error("expected OccurredAt to be non-nil")
 	}
 	if event.ReceivedAt == nil {
 		t.Error("expected ReceivedAt to be non-nil")
 	}
-	if event.TotalRuns != 2 {
-		t.Errorf("expected TotalRuns 2, got %d", event.TotalRuns)
-	}
-	if len(event.Runs) != 2 {
-		t.Fatalf("expected 2 runs, got %d", len(event.Runs))
+	if len(event.FunctionRuns) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(event.FunctionRuns))
 	}
 
-	if event.Runs[0].ID != testRunID1Events {
-		t.Errorf("expected run[0] ID 'run-1', got %q", event.Runs[0].ID)
+	if event.FunctionRuns[0].ID != testRunID1Events {
+		t.Errorf("expected run[0] ID 'run-1', got %q", event.FunctionRuns[0].ID)
 	}
-	if event.Runs[0].Status != testStatusCompleted {
-		t.Errorf("expected run[0] status 'COMPLETED', got %q", event.Runs[0].Status)
+	if event.FunctionRuns[0].Status != testStatusCompleted {
+		t.Errorf("expected run[0] status 'COMPLETED', got %q", event.FunctionRuns[0].Status)
 	}
-	if event.Runs[0].Function == nil || event.Runs[0].Function.Name != "Send Welcome Email" {
+	if event.FunctionRuns[0].Function == nil || event.FunctionRuns[0].Function.Name != "Send Welcome Email" {
 		t.Errorf("expected run[0] function name 'Send Welcome Email'")
 	}
 
-	if event.Runs[1].ID != testRunID2 {
-		t.Errorf("expected run[1] ID 'run-2', got %q", event.Runs[1].ID)
+	if event.FunctionRuns[1].ID != testRunID2 {
+		t.Errorf("expected run[1] ID 'run-2', got %q", event.FunctionRuns[1].ID)
 	}
-	if event.Runs[1].Status != "FAILED" {
-		t.Errorf("expected run[1] status 'FAILED', got %q", event.Runs[1].Status)
+	if event.FunctionRuns[1].Status != "FAILED" {
+		t.Errorf("expected run[1] status 'FAILED', got %q", event.FunctionRuns[1].Status)
 	}
 }
 
 func TestGetEventNotFound(t *testing.T) {
-	response := `{"data": {"event": null}}`
+	response := `{"data": {"events": {"data": []}}}`
 
 	srv := newTestServer(t, response, nil)
 	defer srv.Close()
@@ -617,46 +628,6 @@ func TestSendEvent_DevModeURL(t *testing.T) {
 	}
 }
 
-func TestListEvents_SinceFilter(t *testing.T) {
-	response := testEmptyEventsResp
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	since := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
-	_, err := client.ListEvents(context.Background(), ListEventsOptions{
-		First: 10,
-		Since: since,
-	})
-	if err != nil {
-		t.Fatalf("ListEvents returned error: %v", err)
-	}
-
-	// Verify filter contains "from" key.
-	filterRaw, ok := captured.Variables["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
-	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	from, ok := filter["from"]
-	if !ok {
-		t.Fatal("expected 'from' key in filter")
-	}
-	if from != since.Format(time.RFC3339) {
-		t.Errorf("expected from=%q, got %q", since.Format(time.RFC3339), from)
-	}
-}
-
 func TestListEvents_NameFilter(t *testing.T) {
 	response := testEmptyEventsResp
 
@@ -670,32 +641,22 @@ func TestListEvents_NameFilter(t *testing.T) {
 	})
 
 	_, err := client.ListEvents(context.Background(), ListEventsOptions{
-		First: 10,
-		Name:  "user/signup",
+		Name: "user/signup",
 	})
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
 
-	filterRaw, ok := captured.Variables["filter"]
+	name, ok := captured.Variables["name"]
 	if !ok {
-		t.Fatal("expected filter in variables")
-	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	name, ok := filter["name"]
-	if !ok {
-		t.Fatal("expected 'name' key in filter")
+		t.Fatal("expected 'name' key in variables")
 	}
 	if name != "user/signup" {
 		t.Errorf("expected name=%q, got %q", "user/signup", name)
 	}
 }
 
-func TestListEvents_FirstDefaultsTo20(t *testing.T) {
+func TestListEvents_RecentCountDefaultsTo5(t *testing.T) {
 	response := testEmptyEventsResp
 
 	var captured graphqlRequest
@@ -708,42 +669,43 @@ func TestListEvents_FirstDefaultsTo20(t *testing.T) {
 	})
 
 	_, err := client.ListEvents(context.Background(), ListEventsOptions{
-		First: 0, // should default to 20
+		RecentCount: 0, // should default to 5
 	})
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
 
-	first, ok := captured.Variables["first"].(float64)
+	rc, ok := captured.Variables["recentCount"].(float64)
 	if !ok {
-		t.Fatalf("expected first to be a number, got %T", captured.Variables["first"])
+		t.Fatalf("expected recentCount to be a number, got %T", captured.Variables["recentCount"])
 	}
-	if int(first) != 20 {
-		t.Errorf("expected first=20, got %d", int(first))
+	if int(rc) != 5 {
+		t.Errorf("expected recentCount=5, got %d", int(rc))
 	}
 }
 
-func TestListEvents_RunWithNilFunction(t *testing.T) {
+func TestListEvents_RecentRunWithNilFunction(t *testing.T) {
 	response := `{
 		"data": {
-			"eventsV2": {
-				"edges": [
+			"events": {
+				"data": [
 					{
-						"node": {
-							"id": "evt-1",
-							"name": "test/event",
-							"runs": [
-								{
-									"id": "run-1",
-									"status": "RUNNING"
-								}
-							]
-						},
-						"cursor": "c1"
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"name": "test/event",
+								"functionRuns": [
+									{
+										"id": "run-1",
+										"status": "RUNNING"
+									}
+								]
+							}
+						]
 					}
 				],
-				"pageInfo": {"hasNextPage": false},
-				"totalCount": 1
+				"page": {"page": 1, "perPage": 20, "totalItems": 1, "totalPages": 1}
 			}
 		}
 	}`
@@ -756,15 +718,15 @@ func TestListEvents_RunWithNilFunction(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	conn, err := client.ListEvents(context.Background(), ListEventsOptions{First: 10})
+	result, err := client.ListEvents(context.Background(), ListEventsOptions{})
 	if err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
 
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge, got %d", len(conn.Edges))
+	if len(result.Data) != 1 {
+		t.Fatalf("expected 1 event type, got %d", len(result.Data))
 	}
-	run := conn.Edges[0].Node.Runs[0]
+	run := result.Data[0].Recent[0].FunctionRuns[0]
 	if run.Function != nil {
 		t.Errorf("expected nil Function for run without function field, got %+v", run.Function)
 	}
@@ -776,47 +738,19 @@ func TestListEvents_RunWithNilFunction(t *testing.T) {
 func TestGetEvent_NilOccurredAt(t *testing.T) {
 	response := `{
 		"data": {
-			"event": {
-				"id": "evt-1",
-				"name": "test/event",
-				"receivedAt": "2025-01-01T00:00:01Z",
-				"raw": "{}",
-				"runs": []
-			}
-		}
-	}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	event, err := client.GetEvent(context.Background(), "evt-1")
-	if err != nil {
-		t.Fatalf("GetEvent returned error: %v", err)
-	}
-
-	if event.CreatedAt != nil {
-		t.Errorf("expected nil CreatedAt when occurredAt is missing, got %v", event.CreatedAt)
-	}
-	if event.ReceivedAt == nil {
-		t.Error("expected non-nil ReceivedAt")
-	}
-}
-
-func TestGetEvent_RunWithNilFunction(t *testing.T) {
-	response := `{
-		"data": {
-			"event": {
-				"id": "evt-1",
-				"name": "test/event",
-				"runs": [
+			"events": {
+				"data": [
 					{
-						"id": "run-1",
-						"status": "RUNNING"
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"name": "test/event",
+								"receivedAt": "2025-01-01T00:00:01Z",
+								"event": "{}",
+								"functionRuns": []
+							}
+						]
 					}
 				]
 			}
@@ -836,11 +770,57 @@ func TestGetEvent_RunWithNilFunction(t *testing.T) {
 		t.Fatalf("GetEvent returned error: %v", err)
 	}
 
-	if len(event.Runs) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(event.Runs))
+	if event.OccurredAt != nil {
+		t.Errorf("expected nil OccurredAt when missing, got %v", event.OccurredAt)
 	}
-	if event.Runs[0].Function != nil {
-		t.Errorf("expected nil Function, got %+v", event.Runs[0].Function)
+	if event.ReceivedAt == nil {
+		t.Error("expected non-nil ReceivedAt")
+	}
+}
+
+func TestGetEvent_RunWithNilFunction(t *testing.T) {
+	response := `{
+		"data": {
+			"events": {
+				"data": [
+					{
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"name": "test/event",
+								"functionRuns": [
+									{
+										"id": "run-1",
+										"status": "RUNNING"
+									}
+								]
+							}
+						]
+					}
+				]
+			}
+		}
+	}`
+
+	srv := newTestServer(t, response, nil)
+	defer srv.Close()
+
+	client := NewClient(ClientOptions{
+		SigningKey: "test-key",
+		APIBaseURL: srv.URL,
+	})
+
+	event, err := client.GetEvent(context.Background(), "evt-1")
+	if err != nil {
+		t.Fatalf("GetEvent returned error: %v", err)
+	}
+
+	if len(event.FunctionRuns) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(event.FunctionRuns))
+	}
+	if event.FunctionRuns[0].Function != nil {
+		t.Errorf("expected nil Function, got %+v", event.FunctionRuns[0].Function)
 	}
 }
 

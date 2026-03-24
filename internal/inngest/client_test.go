@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const testSigningKey = "signkey-test-abc123def456"
+const (
+	testSigningKey = "signkey-test-abc123def456"
+	testEnvProd    = "production"
+)
 
 // ---------------------------------------------------------------------------
 // TestNewClient
@@ -73,7 +76,7 @@ func TestNewClient(t *testing.T) {
 		c := NewClient(ClientOptions{
 			SigningKey: "sk-test-key",
 			EventKey:   "evt-key",
-			Env:        "production",
+			Env:        testEnvProd,
 			DevMode:    true,
 		})
 		if c.signingKey != "sk-test-key" {
@@ -82,8 +85,8 @@ func TestNewClient(t *testing.T) {
 		if c.eventKey != "evt-key" {
 			t.Errorf("eventKey = %q, want %q", c.eventKey, "evt-key")
 		}
-		if c.env != "production" {
-			t.Errorf("env = %q, want %q", c.env, "production")
+		if c.env != testEnvProd {
+			t.Errorf("env = %q, want %q", c.env, testEnvProd)
 		}
 		if !c.devMode {
 			t.Error("devMode = false, want true")
@@ -666,7 +669,7 @@ func TestDoSetsEnvHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(ClientOptions{Env: "production", DevMode: false})
+	c := NewClient(ClientOptions{Env: testEnvProd, DevMode: false})
 	c.httpClient = srv.Client()
 
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/test", nil)
@@ -680,8 +683,8 @@ func TestDoSetsEnvHeader(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if gotEnv != "production" {
-		t.Errorf("X-Inngest-Env = %q, want %q", gotEnv, "production")
+	if gotEnv != testEnvProd {
+		t.Errorf("X-Inngest-Env = %q, want %q", gotEnv, testEnvProd)
 	}
 }
 
@@ -699,7 +702,7 @@ func TestDoSuppressesEnvHeaderInDevMode(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(ClientOptions{Env: "production", DevMode: true})
+	c := NewClient(ClientOptions{Env: testEnvProd, DevMode: true})
 	c.httpClient = srv.Client()
 
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/test", nil)

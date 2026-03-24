@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -78,7 +77,7 @@ type functionRow struct {
 	Slug    string
 	Trigger string
 	App     string
-	SDK     string
+	Status  string
 }
 
 func printFunctionsTable(functions []inngest.Function) error {
@@ -89,20 +88,22 @@ func printFunctionsTable(functions []inngest.Function) error {
 			triggers = append(triggers, t.Type+":"+t.Value)
 		}
 		appName := ""
-		sdk := ""
 		if fn.App != nil {
 			appName = fn.App.Name
-			sdk = fn.App.SDKLanguage
-			if fn.App.SDKVersion != "" {
-				sdk += "/" + fn.App.SDKVersion
-			}
+		}
+		status := "active"
+		if fn.IsPaused {
+			status = "paused"
+		}
+		if fn.IsArchived {
+			status = "archived"
 		}
 		rows[i] = functionRow{
 			Name:    fn.Name,
 			Slug:    fn.Slug,
 			Trigger: strings.Join(triggers, ", "),
 			App:     appName,
-			SDK:     sdk,
+			Status:  status,
 		}
 	}
 	return output.Print(rows, output.FormatTable)
@@ -137,18 +138,20 @@ func printFunctionDetail(fn *inngest.Function) error {
 	fmt.Printf("Name:        %s\n", fn.Name)
 	fmt.Printf("Slug:        %s\n", fn.Slug)
 	fmt.Printf("ID:          %s\n", fn.ID)
-	fmt.Printf("App ID:      %s\n", fn.AppID)
-	fmt.Printf("URL:         %s\n", fn.URL)
-	fmt.Printf("Concurrency: %d\n", fn.Concurrency)
+	if fn.URL != "" {
+		fmt.Printf("URL:         %s\n", fn.URL)
+	}
+	fmt.Printf("Paused:      %v\n", fn.IsPaused)
+	fmt.Printf("Archived:    %v\n", fn.IsArchived)
 
 	if fn.App != nil {
 		fmt.Printf("\nApp:\n")
-		fmt.Printf("  Name:      %s\n", fn.App.Name)
-		fmt.Printf("  SDK:       %s/%s\n", fn.App.SDKLanguage, fn.App.SDKVersion)
-		if fn.App.Framework != "" {
-			fmt.Printf("  Framework: %s\n", fn.App.Framework)
+		fmt.Printf("  Name:       %s\n", fn.App.Name)
+		fmt.Printf("  ID:         %s\n", fn.App.ID)
+		fmt.Printf("  ExternalID: %s\n", fn.App.ExternalID)
+		if fn.App.AppVersion != "" {
+			fmt.Printf("  Version:    %s\n", fn.App.AppVersion)
 		}
-		fmt.Printf("  Connected: %v\n", fn.App.Connected)
 	}
 
 	if len(fn.Triggers) > 0 {
@@ -234,23 +237,14 @@ func newFunctionsConfigCmd() *cobra.Command {
 				return fmt.Errorf("getting function config: %w", err)
 			}
 
-			// Build a combined config view from both config JSON and configuration struct.
 			result := buildConfigOutput(fn)
 
 			if format == output.FormatText {
 				if fn.Configuration != nil {
 					fmt.Printf("Configuration for %s:\n\n", fn.Slug)
 					printConfiguration(fn.Configuration)
-				}
-				if fn.Config != "" {
-					fmt.Printf("\nRaw Config:\n")
-					var pretty json.RawMessage
-					if err := json.Unmarshal([]byte(fn.Config), &pretty); err == nil {
-						b, _ := json.MarshalIndent(pretty, "  ", "  ")
-						fmt.Printf("  %s\n", string(b))
-					} else {
-						fmt.Printf("  %s\n", fn.Config)
-					}
+				} else {
+					fmt.Printf("No configuration for %s\n", fn.Slug)
 				}
 				return nil
 			}
@@ -268,15 +262,6 @@ func buildConfigOutput(fn *inngest.Function) map[string]any {
 
 	if fn.Configuration != nil {
 		result["configuration"] = fn.Configuration
-	}
-
-	if fn.Config != "" {
-		var parsed any
-		if err := json.Unmarshal([]byte(fn.Config), &parsed); err == nil {
-			result["rawConfig"] = parsed
-		} else {
-			result["rawConfig"] = fn.Config
-		}
 	}
 
 	return result

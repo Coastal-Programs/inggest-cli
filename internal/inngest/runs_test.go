@@ -2,7 +2,6 @@ package inngest
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,34 +9,41 @@ import (
 	"time"
 )
 
-const testEmptyRunsResp = `{"data": {"runs": {"edges": [], "pageInfo": {"hasNextPage": false}, "totalCount": 0}}}`
-
-func TestListRuns(t *testing.T) {
-	response := `{
+// eventsResponse is a helper that wraps function runs in the events-based
+// GraphQL response structure used by the new ListRuns query.
+func eventsResponse(functionRuns string) string {
+	return `{
 		"data": {
-			"runs": {
-				"edges": [
+			"events": {
+				"data": [
 					{
-						"node": {
-							"id": "run-1",
-							"status": "COMPLETED",
-							"eventName": "test/event",
-							"isBatch": false,
-							"function": {
-								"name": "My Func",
-								"slug": "my-func"
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2024-01-01T00:00:00Z",
+								"receivedAt": "2024-01-01T00:00:00Z",
+								"name": "test/event",
+								"functionRuns": [` + functionRuns + `]
 							}
-						},
-						"cursor": "c1"
+						]
 					}
 				],
-				"pageInfo": {
-					"hasNextPage": false
-				},
-				"totalCount": 1
+				"page": {"page": 1, "totalPages": 1}
 			}
 		}
 	}`
+}
+
+func TestListRuns(t *testing.T) {
+	response := eventsResponse(`{
+		"id": "run-1",
+		"status": "COMPLETED",
+		"startedAt": "2024-01-01T00:00:01Z",
+		"endedAt": "2024-01-01T00:00:02Z",
+		"output": "{}",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	}`)
 
 	var captured graphqlRequest
 	srv := newTestServer(t, response, &captured)
@@ -55,7 +61,7 @@ func TestListRuns(t *testing.T) {
 		t.Fatalf("ListRuns returned error: %v", err)
 	}
 
-	// Verify the returned connection.
+	// TotalCount is set to the number of filtered results.
 	if conn.TotalCount != 1 {
 		t.Errorf("expected TotalCount 1, got %d", conn.TotalCount)
 	}
@@ -72,9 +78,6 @@ func TestListRuns(t *testing.T) {
 	}
 	if edge.Node.EventName != "test/event" {
 		t.Errorf("expected eventName 'test/event', got %q", edge.Node.EventName)
-	}
-	if edge.Cursor != "c1" {
-		t.Errorf("expected cursor 'c1', got %q", edge.Cursor)
 	}
 	if edge.Node.Function == nil {
 		t.Fatal("expected Function to be non-nil")
@@ -96,28 +99,13 @@ func TestListRuns(t *testing.T) {
 }
 
 func TestGetRun(t *testing.T) {
-	response := `{
-		"data": {
-			"run": {
-				"id": "run-1",
-				"status": "RUNNING",
-				"eventName": "test/event",
-				"isBatch": false,
-				"output": "{\"result\":true}",
-				"traceID": "trace-1",
-				"function": {
-					"name": "My Func",
-					"slug": "my-func",
-					"config": "{}"
-				},
-				"app": {
-					"name": "my-app",
-					"sdkLanguage": "go",
-					"sdkVersion": "1.0"
-				}
-			}
-		}
-	}`
+	response := eventsResponse(`{
+		"id": "run-1",
+		"status": "RUNNING",
+		"startedAt": "2024-01-01T00:00:01Z",
+		"output": "{\"result\":true}",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	}`)
 
 	var captured graphqlRequest
 	srv := newTestServer(t, response, &captured)
@@ -146,9 +134,6 @@ func TestGetRun(t *testing.T) {
 	if run.Output != `{"result":true}` {
 		t.Errorf("expected output '{\"result\":true}', got %q", run.Output)
 	}
-	if run.TraceID != "trace-1" {
-		t.Errorf("expected traceID 'trace-1', got %q", run.TraceID)
-	}
 
 	// Verify Function.
 	if run.Function == nil {
@@ -160,35 +145,10 @@ func TestGetRun(t *testing.T) {
 	if run.Function.Slug != "my-func" {
 		t.Errorf("expected function slug 'my-func', got %q", run.Function.Slug)
 	}
-	if run.Function.Config != "{}" {
-		t.Errorf("expected function config '{}', got %q", run.Function.Config)
-	}
-
-	// Verify App.
-	if run.App == nil {
-		t.Fatal("expected App to be non-nil")
-	}
-	if run.App.Name != "my-app" {
-		t.Errorf("expected app name 'my-app', got %q", run.App.Name)
-	}
-	if run.App.SDKLanguage != "go" {
-		t.Errorf("expected sdkLanguage 'go', got %q", run.App.SDKLanguage)
-	}
-	if run.App.SDKVersion != "1.0" {
-		t.Errorf("expected sdkVersion '1.0', got %q", run.App.SDKVersion)
-	}
-
-	// Verify the captured request contains expected variable.
-	if captured.Variables == nil {
-		t.Fatal("expected variables to be non-nil")
-	}
-	if runID, ok := captured.Variables["runID"].(string); !ok || runID != testRunID1Events {
-		t.Errorf("expected runID variable 'run-1', got %v", captured.Variables["runID"])
-	}
 }
 
 func TestGetRun_NotFound(t *testing.T) {
-	response := `{"data": {"run": null}}`
+	response := testEmptyEventsResp
 
 	srv := newTestServer(t, response, nil)
 	defer srv.Close()
@@ -200,7 +160,7 @@ func TestGetRun_NotFound(t *testing.T) {
 
 	_, err := client.GetRun(context.Background(), "nonexistent")
 	if err == nil {
-		t.Fatal("expected error for nil run, got nil")
+		t.Fatal("expected error for missing run, got nil")
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected error to contain 'not found', got %q", err.Error())
@@ -226,7 +186,7 @@ func TestCancelRun(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	run, err := client.CancelRun(context.Background(), testRunID1Events)
+	run, err := client.CancelRun(context.Background(), "env-uuid-123", testRunID1Events)
 	if err != nil {
 		t.Fatalf("CancelRun returned error: %v", err)
 	}
@@ -238,12 +198,35 @@ func TestCancelRun(t *testing.T) {
 		t.Errorf("expected status 'CANCELLED', got %q", run.Status)
 	}
 
-	// Verify the query is a mutation.
+	// Verify the query is a mutation with envID.
 	if !strings.Contains(captured.Query, "mutation") {
 		t.Errorf("expected query to contain 'mutation', got %q", captured.Query)
 	}
 	if !strings.Contains(captured.Query, "cancelRun") {
 		t.Errorf("expected query to contain 'cancelRun', got %q", captured.Query)
+	}
+	if !strings.Contains(captured.Query, "$envID: UUID!") {
+		t.Errorf("expected query to contain '$envID: UUID!', got %q", captured.Query)
+	}
+
+	// Verify the envID variable was sent.
+	if envID, ok := captured.Variables["envID"].(string); !ok || envID != "env-uuid-123" {
+		t.Errorf("expected envID variable 'env-uuid-123', got %v", captured.Variables["envID"])
+	}
+}
+
+func TestCancelRun_MissingEnvID(t *testing.T) {
+	client := NewClient(ClientOptions{
+		SigningKey: "test-key",
+		APIBaseURL: "http://localhost:9999",
+	})
+
+	_, err := client.CancelRun(context.Background(), "", "run-1")
+	if err == nil {
+		t.Fatal("expected error for missing envID, got nil")
+	}
+	if !strings.Contains(err.Error(), "environment ID") {
+		t.Errorf("expected error about environment ID, got %q", err.Error())
 	}
 }
 
@@ -329,9 +312,48 @@ func TestListRuns_HTTPError(t *testing.T) {
 	}
 }
 
-func TestListRuns_RequestBody(t *testing.T) {
-	var captured graphqlRequest
-	srv := newTestServer(t, testEmptyRunsResp, &captured)
+func TestListRuns_StatusFilter(t *testing.T) {
+	// Response has two runs: one COMPLETED, one FAILED.
+	response := `{
+		"data": {
+			"events": {
+				"data": [
+					{
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2024-01-01T00:00:00Z",
+								"receivedAt": "2024-01-01T00:00:00Z",
+								"name": "test/event",
+								"functionRuns": [
+									{
+										"id": "run-1",
+										"status": "COMPLETED",
+										"startedAt": "2024-01-01T00:00:01Z",
+										"endedAt": "2024-01-01T00:00:02Z",
+										"output": "{}",
+										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+									},
+									{
+										"id": "run-2",
+										"status": "FAILED",
+										"startedAt": "2024-01-01T00:00:01Z",
+										"endedAt": "2024-01-01T00:00:02Z",
+										"output": "{}",
+										"function": {"id": "fn-2", "name": "Fn2", "slug": "fn-2"}
+									}
+								]
+							}
+						]
+					}
+				],
+				"page": {"page": 1, "totalPages": 1}
+			}
+		}
+	}`
+
+	srv := newTestServer(t, response, nil)
 	defer srv.Close()
 
 	client := NewClient(ClientOptions{
@@ -339,54 +361,23 @@ func TestListRuns_RequestBody(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First:  5,
-		After:  "cursor-abc",
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
+		First:  10,
 		Status: []string{"COMPLETED"},
 	})
 	if err != nil {
 		t.Fatalf("ListRuns returned error: %v", err)
 	}
 
-	// Verify the query string contains expected fragments.
-	if !strings.Contains(captured.Query, "ListRuns") {
-		t.Errorf("expected query to contain 'ListRuns', got %q", captured.Query)
+	// Only the COMPLETED run should be returned (client-side filtering).
+	if len(conn.Edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d", len(conn.Edges))
 	}
-
-	// Verify variables.
-	vars := captured.Variables
-	if vars == nil {
-		t.Fatal("expected variables to be non-nil")
+	if conn.Edges[0].Node.ID != "run-1" {
+		t.Errorf("expected run-1, got %q", conn.Edges[0].Node.ID)
 	}
-
-	// "first" is sent as a number — json decodes it as float64.
-	if first, ok := vars["first"].(float64); !ok || int(first) != 5 {
-		t.Errorf("expected first=5, got %v", vars["first"])
-	}
-	if after, ok := vars["after"].(string); !ok || after != "cursor-abc" {
-		t.Errorf("expected after='cursor-abc', got %v", vars["after"])
-	}
-
-	// Verify filter contains status.
-	filterRaw, ok := vars["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
-	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	statusRaw, ok := filter["status"]
-	if !ok {
-		t.Fatal("expected status in filter")
-	}
-	statusArr, ok := statusRaw.([]any)
-	if !ok {
-		t.Fatalf("expected status to be an array, got %T", statusRaw)
-	}
-	if len(statusArr) != 1 || statusArr[0] != "COMPLETED" {
-		t.Errorf("expected status ['COMPLETED'], got %v", statusArr)
+	if conn.Edges[0].Node.Status != "COMPLETED" {
+		t.Errorf("expected COMPLETED, got %q", conn.Edges[0].Node.Status)
 	}
 }
 
@@ -401,7 +392,7 @@ func TestCancelRun_NilResult(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	_, err := client.CancelRun(context.Background(), testRunID1Events)
+	_, err := client.CancelRun(context.Background(), "env-uuid-123", testRunID1Events)
 	if err == nil {
 		t.Fatal("expected error for nil cancelRun result, got nil")
 	}
@@ -410,16 +401,8 @@ func TestCancelRun_NilResult(t *testing.T) {
 	}
 }
 
-func TestListRuns_EmptyEdges(t *testing.T) {
-	response := `{
-		"data": {
-			"runs": {
-				"edges": [],
-				"pageInfo": {"hasNextPage": false},
-				"totalCount": 0
-			}
-		}
-	}`
+func TestListRuns_Empty(t *testing.T) {
+	response := testEmptyEventsResp
 
 	srv := newTestServer(t, response, nil)
 	defer srv.Close()
@@ -438,102 +421,6 @@ func TestListRuns_EmptyEdges(t *testing.T) {
 	}
 	if conn.TotalCount != 0 {
 		t.Errorf("expected totalCount 0, got %d", conn.TotalCount)
-	}
-}
-
-func TestConvertTrace(t *testing.T) {
-	started := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	ended := time.Date(2025, 1, 1, 0, 0, 1, 0, time.UTC)
-	childStarted := time.Date(2025, 1, 1, 0, 0, 0, 500000000, time.UTC)
-	childEnded := time.Date(2025, 1, 1, 0, 0, 0, 800000000, time.UTC)
-
-	node := &traceNode{
-		RunID:     testRunID1Events,
-		SpanID:    "span-root",
-		Name:      "my-function",
-		Status:    "COMPLETED",
-		StartedAt: &started,
-		EndedAt:   &ended,
-		Duration:  1000,
-		StepOp:    "",
-		Children: []traceNode{
-			{
-				SpanID:    "span-child-1",
-				Name:      "step.run",
-				Status:    "COMPLETED",
-				StartedAt: &childStarted,
-				EndedAt:   &childEnded,
-				Duration:  300,
-				StepOp:    "StepRun",
-				Children:  nil,
-			},
-			{
-				SpanID:   "span-child-2",
-				Name:     "step.sleep",
-				Status:   "COMPLETED",
-				Duration: 500,
-				StepOp:   "Sleep",
-			},
-		},
-	}
-
-	span := convertTrace(node)
-	if span == nil {
-		t.Fatal("expected non-nil span")
-	}
-	if span.RunID != testRunID1Events {
-		t.Errorf("expected RunID 'run-1', got %q", span.RunID)
-	}
-	if span.SpanID != "span-root" {
-		t.Errorf("expected SpanID 'span-root', got %q", span.SpanID)
-	}
-	if span.Name != "my-function" {
-		t.Errorf("expected Name 'my-function', got %q", span.Name)
-	}
-	if span.Status != testStatusCompleted {
-		t.Errorf("expected Status 'COMPLETED', got %q", span.Status)
-	}
-	if span.Duration != 1000 {
-		t.Errorf("expected Duration 1000, got %d", span.Duration)
-	}
-	if span.StartedAt == nil || !span.StartedAt.Equal(started) {
-		t.Errorf("unexpected StartedAt: %v", span.StartedAt)
-	}
-	if span.EndedAt == nil || !span.EndedAt.Equal(ended) {
-		t.Errorf("unexpected EndedAt: %v", span.EndedAt)
-	}
-
-	// Children.
-	if len(span.Children) != 2 {
-		t.Fatalf("expected 2 children, got %d", len(span.Children))
-	}
-	child1 := span.Children[0]
-	if child1.SpanID != "span-child-1" {
-		t.Errorf("expected child SpanID 'span-child-1', got %q", child1.SpanID)
-	}
-	if child1.Name != "step.run" {
-		t.Errorf("expected child Name 'step.run', got %q", child1.Name)
-	}
-	if child1.StepOp != "StepRun" {
-		t.Errorf("expected child StepOp 'StepRun', got %q", child1.StepOp)
-	}
-	if child1.Duration != 300 {
-		t.Errorf("expected child Duration 300, got %d", child1.Duration)
-	}
-
-	child2 := span.Children[1]
-	if child2.SpanID != "span-child-2" {
-		t.Errorf("expected child SpanID 'span-child-2', got %q", child2.SpanID)
-	}
-	if child2.StepOp != "Sleep" {
-		t.Errorf("expected child StepOp 'Sleep', got %q", child2.StepOp)
-	}
-}
-
-func TestConvertTrace_Nil(t *testing.T) {
-	span := convertTrace(nil)
-	if span != nil {
-		t.Errorf("expected nil span for nil input, got %+v", span)
 	}
 }
 
@@ -560,10 +447,44 @@ func TestStatusToUpperEmpty(t *testing.T) {
 }
 
 func TestListRuns_FromFilter(t *testing.T) {
-	response := testEmptyRunsResp
+	// The From filter is applied client-side. Provide two runs: one before
+	// the threshold and one after.
+	response := `{
+		"data": {
+			"events": {
+				"data": [
+					{
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2025-05-01T00:00:00Z",
+								"receivedAt": "2025-05-01T00:00:00Z",
+								"name": "test/event",
+								"functionRuns": [
+									{
+										"id": "run-early",
+										"status": "COMPLETED",
+										"startedAt": "2025-05-01T00:00:00Z",
+										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+									},
+									{
+										"id": "run-late",
+										"status": "COMPLETED",
+										"startedAt": "2025-07-01T00:00:00Z",
+										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+									}
+								]
+							}
+						]
+					}
+				],
+				"page": {"page": 1, "totalPages": 1}
+			}
+		}
+	}`
 
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
+	srv := newTestServer(t, response, nil)
 	defer srv.Close()
 
 	client := NewClient(ClientOptions{
@@ -572,7 +493,7 @@ func TestListRuns_FromFilter(t *testing.T) {
 	})
 
 	from := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
 		First: 10,
 		From:  from,
 	})
@@ -580,29 +501,54 @@ func TestListRuns_FromFilter(t *testing.T) {
 		t.Fatalf("ListRuns returned error: %v", err)
 	}
 
-	filterRaw, ok := captured.Variables["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
+	// Only run-late should pass the From filter.
+	if len(conn.Edges) != 1 {
+		t.Fatalf("expected 1 edge after From filter, got %d", len(conn.Edges))
 	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	fromVal, ok := filter["from"]
-	if !ok {
-		t.Fatal("expected 'from' key in filter")
-	}
-	if fromVal != from.Format(time.RFC3339) {
-		t.Errorf("expected from=%q, got %q", from.Format(time.RFC3339), fromVal)
+	if conn.Edges[0].Node.ID != "run-late" {
+		t.Errorf("expected run-late, got %q", conn.Edges[0].Node.ID)
 	}
 }
 
 func TestListRuns_UntilFilter(t *testing.T) {
-	response := testEmptyRunsResp
+	// The Until filter is applied client-side. Provide two runs: one before
+	// the threshold and one after.
+	response := `{
+		"data": {
+			"events": {
+				"data": [
+					{
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2025-05-01T00:00:00Z",
+								"receivedAt": "2025-05-01T00:00:00Z",
+								"name": "test/event",
+								"functionRuns": [
+									{
+										"id": "run-early",
+										"status": "COMPLETED",
+										"startedAt": "2025-05-01T00:00:00Z",
+										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+									},
+									{
+										"id": "run-late",
+										"status": "COMPLETED",
+										"startedAt": "2025-07-01T00:00:00Z",
+										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+									}
+								]
+							}
+						]
+					}
+				],
+				"page": {"page": 1, "totalPages": 1}
+			}
+		}
+	}`
 
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
+	srv := newTestServer(t, response, nil)
 	defer srv.Close()
 
 	client := NewClient(ClientOptions{
@@ -611,7 +557,7 @@ func TestListRuns_UntilFilter(t *testing.T) {
 	})
 
 	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
 		First: 10,
 		Until: &until,
 	})
@@ -619,29 +565,51 @@ func TestListRuns_UntilFilter(t *testing.T) {
 		t.Fatalf("ListRuns returned error: %v", err)
 	}
 
-	filterRaw, ok := captured.Variables["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
+	// Only run-early should pass the Until filter.
+	if len(conn.Edges) != 1 {
+		t.Fatalf("expected 1 edge after Until filter, got %d", len(conn.Edges))
 	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	untilVal, ok := filter["until"]
-	if !ok {
-		t.Fatal("expected 'until' key in filter")
-	}
-	if untilVal != until.Format(time.RFC3339) {
-		t.Errorf("expected until=%q, got %q", until.Format(time.RFC3339), untilVal)
+	if conn.Edges[0].Node.ID != "run-early" {
+		t.Errorf("expected run-early, got %q", conn.Edges[0].Node.ID)
 	}
 }
 
 func TestListRuns_FunctionIDsFilter(t *testing.T) {
-	response := testEmptyRunsResp
+	// The FunctionIDs filter is applied client-side.
+	response := `{
+		"data": {
+			"events": {
+				"data": [
+					{
+						"name": "test/event",
+						"recent": [
+							{
+								"id": "evt-1",
+								"occurredAt": "2025-05-01T00:00:00Z",
+								"receivedAt": "2025-05-01T00:00:00Z",
+								"name": "test/event",
+								"functionRuns": [
+									{
+										"id": "run-1",
+										"status": "COMPLETED",
+										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+									},
+									{
+										"id": "run-2",
+										"status": "COMPLETED",
+										"function": {"id": "fn-2", "name": "Fn2", "slug": "fn-2"}
+									}
+								]
+							}
+						]
+					}
+				],
+				"page": {"page": 1, "totalPages": 1}
+			}
+		}
+	}`
 
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
+	srv := newTestServer(t, response, nil)
 	defer srv.Close()
 
 	client := NewClient(ClientOptions{
@@ -649,7 +617,7 @@ func TestListRuns_FunctionIDsFilter(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
 		First:       10,
 		FunctionIDs: []string{"fn-1"},
 	})
@@ -657,33 +625,26 @@ func TestListRuns_FunctionIDsFilter(t *testing.T) {
 		t.Fatalf("ListRuns returned error: %v", err)
 	}
 
-	filterRaw, ok := captured.Variables["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
+	if len(conn.Edges) != 1 {
+		t.Fatalf("expected 1 edge after FunctionIDs filter, got %d", len(conn.Edges))
 	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	fnIDs, ok := filter["functionIDs"]
-	if !ok {
-		t.Fatal("expected 'functionIDs' key in filter")
-	}
-	fnArr, ok := fnIDs.([]any)
-	if !ok {
-		t.Fatalf("expected functionIDs to be an array, got %T", fnIDs)
-	}
-	if len(fnArr) != 1 || fnArr[0] != "fn-1" {
-		t.Errorf("expected functionIDs ['fn-1'], got %v", fnArr)
+	if conn.Edges[0].Node.ID != "run-1" {
+		t.Errorf("expected run-1, got %q", conn.Edges[0].Node.ID)
 	}
 }
 
 func TestListRuns_AppIDsFilter(t *testing.T) {
-	response := testEmptyRunsResp
+	// AppIDs filter is in ListRunsOptions but the events-based response
+	// doesn't include appID on function runs. Verify that when AppIDs
+	// is set the query still executes without error (filtering is a no-op
+	// because runs lack Function.ID matching appIDs).
+	response := eventsResponse(`{
+		"id": "run-1",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+	}`)
 
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
+	srv := newTestServer(t, response, nil)
 	defer srv.Close()
 
 	client := NewClient(ClientOptions{
@@ -691,7 +652,7 @@ func TestListRuns_AppIDsFilter(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
 		First:  10,
 		AppIDs: []string{"app-1"},
 	})
@@ -699,63 +660,9 @@ func TestListRuns_AppIDsFilter(t *testing.T) {
 		t.Fatalf("ListRuns returned error: %v", err)
 	}
 
-	filterRaw, ok := captured.Variables["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
-	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	appIDs, ok := filter["appIDs"]
-	if !ok {
-		t.Fatal("expected 'appIDs' key in filter")
-	}
-	appArr, ok := appIDs.([]any)
-	if !ok {
-		t.Fatalf("expected appIDs to be an array, got %T", appIDs)
-	}
-	if len(appArr) != 1 || appArr[0] != "app-1" {
-		t.Errorf("expected appIDs ['app-1'], got %v", appArr)
-	}
-}
-
-func TestListRuns_QueryFilter(t *testing.T) {
-	response := testEmptyRunsResp
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First: 10,
-		Query: "cel-query",
-	})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-
-	filterRaw, ok := captured.Variables["filter"]
-	if !ok {
-		t.Fatal("expected filter in variables")
-	}
-	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]any
-	if err := json.Unmarshal(filterBytes, &filter); err != nil {
-		t.Fatalf("failed to unmarshal filter: %v", err)
-	}
-	query, ok := filter["query"]
-	if !ok {
-		t.Fatal("expected 'query' key in filter")
-	}
-	if query != "cel-query" {
-		t.Errorf("expected query=%q, got %q", "cel-query", query)
+	// AppIDs filter doesn't match Function.ID or Slug, so run passes through.
+	if len(conn.Edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d", len(conn.Edges))
 	}
 }
 
@@ -779,90 +686,6 @@ func TestGetRun_GraphQLError(t *testing.T) {
 	}
 }
 
-func TestGetRun_NilFunctionNilAppWithTrace(t *testing.T) {
-	response := `{
-		"data": {
-			"run": {
-				"id": "run-1",
-				"status": "COMPLETED",
-				"isBatch": false,
-				"eventName": "test/event",
-				"output": "{}",
-				"traceID": "trace-1",
-				"trace": {
-					"runID": "run-1",
-					"spanID": "span-1",
-					"name": "root",
-					"status": "COMPLETED",
-					"durationMS": 500,
-					"childrenSpans": [
-						{
-							"spanID": "span-2",
-							"name": "step.run",
-							"status": "COMPLETED",
-							"durationMS": 200,
-							"stepOp": "StepRun"
-						}
-					]
-				}
-			}
-		}
-	}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	run, err := client.GetRun(context.Background(), testRunID1Events)
-	if err != nil {
-		t.Fatalf("GetRun returned error: %v", err)
-	}
-
-	if run.Function != nil {
-		t.Errorf("expected nil Function, got %+v", run.Function)
-	}
-	if run.App != nil {
-		t.Errorf("expected nil App, got %+v", run.App)
-	}
-	if run.Trace == nil {
-		t.Fatal("expected non-nil Trace")
-	}
-	if run.Trace.SpanID != "span-1" {
-		t.Errorf("expected trace SpanID 'span-1', got %q", run.Trace.SpanID)
-	}
-	if len(run.Trace.Children) != 1 {
-		t.Fatalf("expected 1 child span, got %d", len(run.Trace.Children))
-	}
-	if run.Trace.Children[0].StepOp != "StepRun" {
-		t.Errorf("expected child StepOp 'StepRun', got %q", run.Trace.Children[0].StepOp)
-	}
-}
-
-func TestNodeToFunctionRun_NilFunctionAppPresent(t *testing.T) {
-	node := runNode{
-		ID:     testRunID1Events,
-		Status: "COMPLETED",
-		App: &struct {
-			Name string `json:"name"`
-		}{Name: "my-app"},
-	}
-
-	run := nodeToFunctionRun(node)
-	if run.Function != nil {
-		t.Errorf("expected nil Function, got %+v", run.Function)
-	}
-	if run.App == nil {
-		t.Fatal("expected non-nil App")
-	}
-	if run.App.Name != "my-app" {
-		t.Errorf("expected app name 'my-app', got %q", run.App.Name)
-	}
-}
-
 func TestCancelRun_GraphQLError(t *testing.T) {
 	response := `{"data": null, "errors": [{"message": "run not cancellable"}]}`
 
@@ -874,7 +697,7 @@ func TestCancelRun_GraphQLError(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	_, err := client.CancelRun(context.Background(), testRunID1Events)
+	_, err := client.CancelRun(context.Background(), "env-uuid-123", testRunID1Events)
 	if err == nil {
 		t.Fatal("expected error for GraphQL error response, got nil")
 	}
@@ -906,11 +729,18 @@ func TestRerunRun_GraphQLError(t *testing.T) {
 func TestGetRun_PostMethod(t *testing.T) {
 	var method string
 
+	// GetRun calls ListRuns under the hood, so serve the events-based response.
+	response := eventsResponse(`{
+		"id": "run-1",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
+	}`)
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method = r.Method
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"data": {"run": {"id": "run-1", "status": "COMPLETED", "isBatch": false}}}`))
+		_, _ = w.Write([]byte(response))
 	}))
 	defer srv.Close()
 

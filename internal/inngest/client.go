@@ -187,6 +187,31 @@ func (c *Client) doWithRetry(req *http.Request, bodyBytes []byte) (*http.Respons
 	return resp, nil
 }
 
+// doEvent executes an HTTP request for the event ingestion endpoint.
+// Unlike do(), it does NOT attach signing key auth headers — the event
+// ingestion endpoint (inn.gs/e/{eventKey}) authenticates via the event key
+// in the URL path. It still sets User-Agent, env header, and supports
+// retry logic for 429s.
+func (c *Client) doEvent(req *http.Request) (*http.Response, error) {
+	var bodyBytes []byte
+	if req.Body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading request body: %w", err)
+		}
+		_ = req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
+
+	req.Header.Set("User-Agent", c.userAgent)
+	if c.env != "" && !c.devMode {
+		req.Header.Set("X-Inngest-Env", c.env)
+	}
+
+	return c.doWithRetry(req, bodyBytes)
+}
+
 // graphqlURL returns the GraphQL endpoint URL.
 func (c *Client) graphqlURL() string {
 	if c.devMode {

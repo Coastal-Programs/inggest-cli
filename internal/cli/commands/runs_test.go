@@ -220,7 +220,7 @@ func TestPrintTraceSpan(t *testing.T) {
 
 func TestRunsList_Success(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"},{"node":{"id":"run-2","status":"RUNNING","startedAt":"2024-01-01T00:00:01Z","eventName":"other/event","function":{"name":"Other Func","slug":"other-func"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false,"endCursor":"c2"},"totalCount":2}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]},{"name":"other/event","recent":[{"id":"evt-2","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"other/event","functionRuns":[{"id":"run-2","status":"RUNNING","startedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn-2","name":"Other Func","slug":"other-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -266,7 +266,7 @@ func TestRunsList_Success(t *testing.T) {
 
 func TestRunsList_Table(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"},{"node":{"id":"run-2","status":"RUNNING","startedAt":"2024-01-01T00:00:01Z","eventName":"other/event","function":{"name":"Other Func","slug":"other-func"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false,"endCursor":"c2"},"totalCount":2}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]},{"name":"other/event","recent":[{"id":"evt-2","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"other/event","functionRuns":[{"id":"run-2","status":"RUNNING","startedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn-2","name":"Other Func","slug":"other-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -295,7 +295,7 @@ func TestRunsList_Table(t *testing.T) {
 
 func TestRunsGet_Success(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetRun": `{"data":{"run":{"id":"run-1","status":"COMPLETED","queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z","eventName":"test/event","output":"{\"result\":\"ok\"}","traceID":"trace-abc","function":{"name":"My Func","slug":"my-func"},"app":{"name":"My App","sdkLanguage":"go","sdkVersion":"0.1.0"},"trace":{"runID":"run-1","spanID":"span-1","name":"my-func","status":"COMPLETED","durationMS":1000,"childrenSpans":[{"spanID":"span-2","name":"step1","status":"COMPLETED","durationMS":500,"stepOp":"run"}]}}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{\"result\":\"ok\"}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -335,7 +335,7 @@ func TestRunsCancel_Force(t *testing.T) {
 	setupCloudState(t, srv.URL)
 
 	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-1", "--force"})
+	cmd.SetArgs([]string{"cancel", "run-1", "--force", "--env-id", "env-uuid-123"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -393,8 +393,10 @@ func TestRunsReplay_Success(t *testing.T) {
 }
 
 func TestRunsList_WithStatusFilter(t *testing.T) {
+	// Provide runs with different statuses; the client-side filter selects only COMPLETED and FAILED.
+	// The --function flag uses fn-id-1, so runs must have function with matching ID or slug.
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false,"endCursor":"c1"},"totalCount":1}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"` + time.Now().Add(-30*time.Minute).Format(time.RFC3339) + `","endedAt":"` + time.Now().Add(-29*time.Minute).Format(time.RFC3339) + `","output":"{}","function":{"id":"fn-id-1","name":"My Func","slug":"my-func"}},{"id":"run-2","status":"RUNNING","startedAt":"` + time.Now().Add(-30*time.Minute).Format(time.RFC3339) + `","output":"{}","function":{"id":"fn-id-1","name":"My Func","slug":"my-func"}},{"id":"run-3","status":"FAILED","startedAt":"` + time.Now().Add(-30*time.Minute).Format(time.RFC3339) + `","endedAt":"` + time.Now().Add(-29*time.Minute).Format(time.RFC3339) + `","output":"{}","function":{"id":"fn-id-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -415,11 +417,15 @@ func TestRunsList_WithStatusFilter(t *testing.T) {
 	if !strings.Contains(got, testRunID1) {
 		t.Errorf("expected output to contain testRunID1, got: %s", got)
 	}
+	// RUNNING run should be filtered out
+	if strings.Contains(got, `"RUNNING"`) {
+		t.Errorf("expected RUNNING run to be filtered out, got: %s", got)
+	}
 }
 
 func TestRunsList_WithUntilFlag(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+		"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -480,7 +486,7 @@ func TestRunsList_InvalidUntil(t *testing.T) {
 
 func TestRunsWatch_ContextCancel(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false,"endCursor":"c1"},"totalCount":1}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -514,7 +520,7 @@ func TestRunsWatch_ContextCancel(t *testing.T) {
 
 func TestRunsWatch_WithFilters(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+		"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -594,7 +600,7 @@ func TestRunsCancel_NonForce_Yes(t *testing.T) {
 	defer func() { os.Stdin = oldStdin }()
 
 	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-1"})
+	cmd.SetArgs([]string{"cancel", "run-1", "--env-id", "env-uuid-123"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 
@@ -683,7 +689,7 @@ func TestRunsCmd_BareHelp(t *testing.T) {
 
 func TestRunsGet_Text(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetRun": `{"data":{"run":{"id":"run-1","status":"COMPLETED","queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z","eventName":"test/event","output":"{\"result\":\"ok\"}","traceID":"trace-abc","function":{"name":"My Func","slug":"my-func"},"app":{"name":"My App","sdkLanguage":"go","sdkVersion":"0.1.0"},"trace":{"runID":"run-1","spanID":"span-1","name":"my-func","status":"COMPLETED","durationMS":1000,"childrenSpans":[{"spanID":"span-2","name":"step1","status":"COMPLETED","durationMS":500,"stepOp":"run"}]}}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{\"result\":\"ok\"}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -734,7 +740,7 @@ func TestRunsList_ListRunsError(t *testing.T) {
 }
 
 func TestRunsGet_Error(t *testing.T) {
-	// No "GetRun" key → mock returns 400 → client returns error.
+	// No "ListRuns" key → mock returns 400 → GetRun (which calls ListRuns) returns error.
 	srv := newMockServer(t, map[string]string{}, nil)
 	defer srv.Close()
 	setupCloudState(t, srv.URL)
@@ -761,7 +767,7 @@ func TestRunsCancel_Error(t *testing.T) {
 	setupCloudState(t, srv.URL)
 
 	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-nonexistent", "--force"})
+	cmd.SetArgs([]string{"cancel", "run-nonexistent", "--force", "--env-id", "env-uuid-123"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -800,7 +806,7 @@ func TestRunsWatch_CtxDonePath(t *testing.T) {
 	// Use a very long interval so the ticker never fires before SIGINT.
 	// This ensures the select picks ctx.Done() instead of ticker.C.
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+		"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -831,9 +837,9 @@ func TestRunsWatch_CtxDonePath(t *testing.T) {
 }
 
 func TestRunsWatch_QueuedAtFallback(t *testing.T) {
-	// Return runs with queuedAt set but startedAt absent (null) to cover the else-if branch.
+	// Return runs with QUEUED status (no startedAt) to cover the else-if branch.
 	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-q1","status":"QUEUED","queuedAt":"2024-01-01T12:00:00Z","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false,"endCursor":"c1"},"totalCount":1}}}`,
+		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T12:00:00Z","receivedAt":"2024-01-01T12:00:00Z","name":"test/event","functionRuns":[{"id":"run-q1","status":"QUEUED","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 	}, nil)
 	defer srv.Close()
 

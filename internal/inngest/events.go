@@ -12,16 +12,15 @@ import (
 
 // ListEventsOptions configures the ListEvents query.
 type ListEventsOptions struct {
-	First int
-	Name  string
-	Since time.Time
+	Name        string
+	RecentCount int // Number of recent event instances per type to fetch.
 }
 
 // SendEvent sends an event via the Event API (POST https://inn.gs/e/{eventKey}).
 // Returns the event IDs.
 func (c *Client) SendEvent(ctx context.Context, event any) ([]string, error) {
 	if c.eventKey == "" {
-		return nil, fmt.Errorf("inngest: event key is required to send events")
+		return nil, fmt.Errorf("inngest: event key is required to send events — set INNGEST_EVENT_KEY or use 'inngest auth login --event-key'")
 	}
 
 	body, err := json.Marshal(event)
@@ -35,7 +34,11 @@ func (c *Client) SendEvent(ctx context.Context, event any) ([]string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.do(req)
+	// The event ingestion endpoint (inn.gs/e/{eventKey}) authenticates via
+	// the event key in the URL path — not via a signing key Bearer token.
+	// Use doEvent instead of do to avoid injecting signing key auth headers
+	// which would cause 401 errors on the event ingestion endpoint.
+	resp, err := c.doEvent(req)
 	if err != nil {
 		return nil, fmt.Errorf("inngest: send event: %w", err)
 	}
@@ -93,183 +96,123 @@ func (c *Client) GetEventRuns(ctx context.Context, eventID string) ([]FunctionRu
 	return runs, nil
 }
 
-// ListEvents queries events via GraphQL.
-func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*EventsConnection, error) {
-	query := `query ListEvents($first: Int!, $filter: EventsFilter!) {
-  eventsV2(first: $first, filter: $filter) {
-    edges {
-      node {
+// ListEvents queries event types via the GraphQL `events` query.
+// The API returns event types (not individual instances). Use the `recent`
+// field on each type to access actual event instances.
+func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*EventTypesResult, error) {
+	recentCount := opts.RecentCount
+	if recentCount <= 0 {
+		recentCount = 5
+	}
+
+	query := `query ListEvents($name: String, $recentCount: Int!) {
+  events(query: {name: $name}) {
+    data {
+      name
+      description
+      firstSeen
+      usage { total }
+      workflows {
         id
         name
+        slug
+        triggers { type value condition }
+        app { id name externalID }
+      }
+      recent(count: $recentCount) {
+        id
         occurredAt
         receivedAt
-        raw
-        runs {
+        name
+        event
+        version
+        functionRuns {
           id
           status
-          function {
-            name
-          }
+          startedAt
+          endedAt
+          output
+          function { id name slug }
         }
       }
-      cursor
     }
-    pageInfo {
-      hasNextPage
-      endCursor
+    page {
+      page
+      perPage
+      totalItems
+      totalPages
     }
-    totalCount
   }
 }`
 
-	filter := map[string]any{}
-	if !opts.Since.IsZero() {
-		filter["from"] = opts.Since.Format(time.RFC3339)
+	variables := map[string]any{
+		"recentCount": recentCount,
 	}
 	if opts.Name != "" {
-		filter["name"] = opts.Name
-	}
-
-	first := opts.First
-	if first <= 0 {
-		first = 20
-	}
-
-	variables := map[string]any{
-		"first":  first,
-		"filter": filter,
+		variables["name"] = opts.Name
 	}
 
 	var result struct {
-		EventsV2 struct {
-			Edges []struct {
-				Node   eventV2Node `json:"node"`
-				Cursor string      `json:"cursor"`
-			} `json:"edges"`
-			PageInfo   PageInfo `json:"pageInfo"`
-			TotalCount int      `json:"totalCount"`
-		} `json:"eventsV2"`
+		Events EventTypesResult `json:"events"`
 	}
 
 	if err := c.ExecuteGraphQL(ctx, "ListEvents", query, variables, &result); err != nil {
 		return nil, fmt.Errorf("inngest: list events: %w", err)
 	}
 
-	conn := &EventsConnection{
-		PageInfo:   result.EventsV2.PageInfo,
-		TotalCount: result.EventsV2.TotalCount,
-	}
-
-	conn.Edges = make([]EventEdge, len(result.EventsV2.Edges))
-	for i, edge := range result.EventsV2.Edges {
-		runs := make([]FunctionRun, len(edge.Node.Runs))
-		for j, r := range edge.Node.Runs {
-			runs[j] = FunctionRun{
-				ID:     r.ID,
-				Status: r.Status,
-			}
-			if r.Function != nil {
-				runs[j].Function = &Function{Name: r.Function.Name}
-			}
-		}
-
-		conn.Edges[i] = EventEdge{
-			Node: Event{
-				ID:         edge.Node.ID,
-				Name:       edge.Node.Name,
-				Raw:        edge.Node.Raw,
-				ReceivedAt: edge.Node.ReceivedAt,
-				Runs:       runs,
-			},
-			Cursor: edge.Cursor,
-		}
-		if edge.Node.OccurredAt != nil {
-			conn.Edges[i].Node.CreatedAt = edge.Node.OccurredAt
-		}
-	}
-
-	return conn, nil
+	return &result.Events, nil
 }
 
-// GetEvent gets a single event by ID via GraphQL.
-func (c *Client) GetEvent(ctx context.Context, eventID string) (*Event, error) {
-	query := `query GetEvent($eventId: ID!) {
-  event(query: {eventId: $eventId}) {
-    id
-    name
-    occurredAt
-    receivedAt
-    raw
-    runs {
-      id
-      status
-      function {
+// GetEvent finds a single event instance by ID. It queries all event types
+// and searches their recent instances for a matching ID.
+func (c *Client) GetEvent(ctx context.Context, eventID string) (*ArchivedEvent, error) {
+	query := `query GetEvent($recentCount: Int!) {
+  events(query: {}) {
+    data {
+      name
+      recent(count: $recentCount) {
+        id
+        occurredAt
+        receivedAt
         name
+        event
+        version
+        functionRuns {
+          id
+          status
+          startedAt
+          endedAt
+          output
+          function { id name slug }
+        }
       }
     }
   }
 }`
 
 	variables := map[string]any{
-		"eventId": eventID,
+		"recentCount": 20,
 	}
 
 	var result struct {
-		Event *eventV2Node `json:"event"`
+		Events struct {
+			Data []struct {
+				Recent []ArchivedEvent `json:"recent"`
+			} `json:"data"`
+		} `json:"events"`
 	}
 
 	if err := c.ExecuteGraphQL(ctx, "GetEvent", query, variables, &result); err != nil {
 		return nil, fmt.Errorf("inngest: get event: %w", err)
 	}
 
-	if result.Event == nil {
-		return nil, fmt.Errorf("inngest: event %s not found", eventID)
-	}
-
-	runs := make([]FunctionRun, len(result.Event.Runs))
-	for i, r := range result.Event.Runs {
-		runs[i] = FunctionRun{
-			ID:     r.ID,
-			Status: r.Status,
-		}
-		if r.Function != nil {
-			runs[i].Function = &Function{Name: r.Function.Name}
+	for _, evtType := range result.Events.Data {
+		for i := range evtType.Recent {
+			if evtType.Recent[i].ID == eventID {
+				return &evtType.Recent[i], nil
+			}
 		}
 	}
 
-	event := &Event{
-		ID:         result.Event.ID,
-		Name:       result.Event.Name,
-		Raw:        result.Event.Raw,
-		ReceivedAt: result.Event.ReceivedAt,
-		Runs:       runs,
-		TotalRuns:  len(runs),
-	}
-	if result.Event.OccurredAt != nil {
-		event.CreatedAt = result.Event.OccurredAt
-	}
-
-	return event, nil
-}
-
-// eventV2Node is the GraphQL shape for event queries.
-type eventV2Node struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	OccurredAt *time.Time `json:"occurredAt,omitempty"`
-	ReceivedAt *time.Time `json:"receivedAt,omitempty"`
-	Raw        string     `json:"raw,omitempty"`
-	Runs       []eventRun `json:"runs,omitempty"`
-}
-
-// eventRun is the GraphQL shape for runs within an event query.
-type eventRun struct {
-	ID       string        `json:"id"`
-	Status   string        `json:"status"`
-	Function *eventRunFunc `json:"function,omitempty"`
-}
-
-// eventRunFunc is the function info within an event run.
-type eventRunFunc struct {
-	Name string `json:"name"`
+	return nil, fmt.Errorf("inngest: event %s not found", eventID)
 }

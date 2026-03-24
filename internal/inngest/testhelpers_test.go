@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+// Shared test constants used across multiple test files in this package.
+const (
+	testAppID1            = "app-1"
+	testMyApp             = "My App"
+	testAppURL            = "https://example.com/api/inngest"
+	testFnID1             = "fn-1"
+	testSendEmail         = "Send Email"
+	testUnauthorizedResp  = `{"data": null, "errors": [{"message": "unauthorized"}]}`
+	testTriggerTypeEvent  = "event"
+	testTriggerUserSignup = "user/signup"
+)
+
 // errBodyReader is an io.ReadCloser whose Read always returns an error.
 // Used to simulate io.ReadAll failures on response bodies.
 type errBodyReader struct{}

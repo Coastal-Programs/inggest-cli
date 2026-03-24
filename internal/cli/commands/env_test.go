@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,99 +94,51 @@ func TestEnvUseRequiresArg(t *testing.T) {
 }
 
 func TestPrintEnvTable(t *testing.T) {
-	state.Env = "my-app"
+	state.Env = "production"
 	state.Output = testOutputTable
 
-	apps := []inngest.App{
+	envs := []inngest.Environment{
 		{
-			ID:            "app-1",
-			Name:          "my-app",
-			SDKLanguage:   "go",
-			SDKVersion:    "0.1.0",
-			Framework:     "stdlib",
-			URL:           "https://example.com/api/inngest",
-			Connected:     true,
-			FunctionCount: 3,
+			ID:   "env-1",
+			Name: "Production",
+			Slug: "production",
+			Type: "production",
 		},
 		{
-			ID:            "app-2",
-			Name:          "other-app",
-			SDKLanguage:   "typescript",
-			SDKVersion:    "1.0.0",
-			Framework:     "next",
-			URL:           "https://other.com/api/inngest",
-			Connected:     false,
-			FunctionCount: 1,
+			ID:   "env-2",
+			Name: "Staging",
+			Slug: "staging",
+			Type: "branch",
 		},
 	}
 
-	err := printEnvTable(apps)
+	err := printEnvTable(envs)
 	if err != nil {
 		t.Fatalf("printEnvTable returned error: %v", err)
 	}
 }
 
 func TestPrintEnvDetail(t *testing.T) {
-	app := &inngest.App{
-		ID:            "app-123",
-		ExternalID:    "ext-456",
-		Name:          "my-app",
-		SDKLanguage:   "go",
-		SDKVersion:    "0.1.0",
-		Framework:     "stdlib",
-		URL:           "https://example.com/api/inngest",
-		Method:        "POST",
-		Connected:     true,
-		FunctionCount: 2,
-		Checksum:      "abc123",
-		Functions: []inngest.Function{
-			{
-				Name: "process-order",
-				Slug: "my-app-process-order",
-				Triggers: []inngest.FunctionTrigger{
-					{Type: "event", Value: "order/created"},
-				},
-			},
-			{
-				Name: "send-email",
-				Slug: "my-app-send-email",
-				Triggers: []inngest.FunctionTrigger{
-					{Type: "event", Value: "email/requested"},
-				},
-			},
-		},
+	env := &inngest.Environment{
+		ID:                   "env-123",
+		Name:                 "Production",
+		Slug:                 "production",
+		Type:                 "production",
+		IsAutoArchiveEnabled: true,
 	}
 
-	err := printEnvDetail(app)
+	err := printEnvDetail(env)
 	if err != nil {
 		t.Fatalf("printEnvDetail returned error: %v", err)
 	}
 }
 
-// setupCloudState configures state globals for cloud tests pointing at the given server URL.
-func setupCloudState(t *testing.T, srvURL string) {
-	t.Helper()
-	t.Setenv("INNGEST_SIGNING_KEY", "")
-	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
-	t.Setenv("INNGEST_EVENT_KEY", "")
-
-	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = testOutputJSON
-	state.APIBaseURL = srvURL
-	state.DevServer = srvURL
-	state.DevMode = false
-	state.Env = ""
-	state.AppVersion = testAppVersion
-}
-
-const listAppsResponse = `{"data":{"apps":[{"id":"app-1","name":"my-app","sdkLanguage":"go","sdkVersion":"0.1.0","framework":"stdlib","url":"https://example.com","connected":true,"functionCount":3},{"id":"app-2","name":"other-app","sdkLanguage":"typescript","sdkVersion":"1.0.0","connected":false,"functionCount":1}]}}`
-
-const getAppResponse = `{"data":{"app":{"id":"app-1","externalID":"ext-1","name":"my-app","sdkLanguage":"go","sdkVersion":"0.1.0","framework":"stdlib","url":"https://example.com","connected":true,"functionCount":3,"functions":[{"id":"fn-1","name":"process","slug":"my-app-process","triggers":[{"type":"event","value":"order/created"}]}]}}}`
+const listEnvsResponse = `{"data":{"envs":{"edges":[{"node":{"id":"env-1","name":"Production","slug":"production","type":"production"}},{"node":{"id":"env-2","name":"Staging","slug":"staging","type":"branch"}}],"pageInfo":{"hasNextPage":false}}}}`
 
 func TestEnvList_JSON(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListApps": listAppsResponse,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": listEnvsResponse,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -207,20 +158,20 @@ func TestEnvList_JSON(t *testing.T) {
 		t.Fatalf("unexpected error: %v", cmdErr)
 	}
 
-	var apps []json.RawMessage
-	if err := json.Unmarshal([]byte(out), &apps); err != nil {
+	var envs []json.RawMessage
+	if err := json.Unmarshal([]byte(out), &envs); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\noutput: %s", err, out)
 	}
 
-	if len(apps) != 2 {
-		t.Errorf("expected 2 apps, got %d", len(apps))
+	if len(envs) != 2 {
+		t.Errorf("expected 2 envs, got %d", len(envs))
 	}
 }
 
 func TestEnvList_Table(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListApps": listAppsResponse,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": listEnvsResponse,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -240,19 +191,18 @@ func TestEnvList_Table(t *testing.T) {
 		t.Fatalf("unexpected error: %v", cmdErr)
 	}
 
-	if !strings.Contains(out, "my-app") {
-		t.Errorf("expected table output to contain %q, got: %s", "my-app", out)
+	if !strings.Contains(out, "Production") {
+		t.Errorf("expected table output to contain %q, got: %s", "Production", out)
 	}
-	if !strings.Contains(out, "other-app") {
-		t.Errorf("expected table output to contain %q, got: %s", "other-app", out)
+	if !strings.Contains(out, "Staging") {
+		t.Errorf("expected table output to contain %q, got: %s", "Staging", out)
 	}
 }
 
 func TestEnvGet_ByName(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListApps": listAppsResponse,
-		"GetApp":   getAppResponse,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": listEnvsResponse,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -261,7 +211,7 @@ func TestEnvGet_ByName(t *testing.T) {
 	var cmdErr error
 	out := captureStdout(t, func() {
 		cmd := NewEnvCmd()
-		cmd.SetArgs([]string{"get", "my-app"})
+		cmd.SetArgs([]string{"get", "Production"})
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 		cmd.SetErr(&buf)
@@ -272,16 +222,16 @@ func TestEnvGet_ByName(t *testing.T) {
 		t.Fatalf("unexpected error: %v", cmdErr)
 	}
 
-	if !strings.Contains(out, "my-app") {
-		t.Errorf("expected output to contain %q, got: %s", "my-app", out)
+	if !strings.Contains(out, "Production") {
+		t.Errorf("expected output to contain %q, got: %s", "Production", out)
 	}
 }
 
 func TestEnvGet_NotFound(t *testing.T) {
+	emptyEnvs := `{"data":{"envs":{"edges":[],"pageInfo":{"hasNextPage":false}}}}`
 	srv := newMockServer(t, map[string]string{
-		"ListApps": `{"data":{"apps":[]}}`,
-		"GetApp":   `{"data":null,"errors":[{"message":"not found"}]}`,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": emptyEnvs,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -295,7 +245,7 @@ func TestEnvGet_NotFound(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when app is not found")
+		t.Fatal("expected error when env is not found")
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected error to contain %q, got: %v", "not found", err)
@@ -304,9 +254,8 @@ func TestEnvGet_NotFound(t *testing.T) {
 
 func TestEnvGet_TextOutput(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListApps": listAppsResponse,
-		"GetApp":   getAppResponse,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": listEnvsResponse,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -315,7 +264,7 @@ func TestEnvGet_TextOutput(t *testing.T) {
 	var cmdErr error
 	out := captureStdout(t, func() {
 		cmd := NewEnvCmd()
-		cmd.SetArgs([]string{"get", "my-app"})
+		cmd.SetArgs([]string{"get", "Production"})
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 		cmd.SetErr(&buf)
@@ -326,8 +275,8 @@ func TestEnvGet_TextOutput(t *testing.T) {
 		t.Fatalf("unexpected error: %v", cmdErr)
 	}
 
-	if !strings.Contains(out, "my-app") {
-		t.Errorf("expected text output to contain %q, got: %s", "my-app", out)
+	if !strings.Contains(out, "Production") {
+		t.Errorf("expected text output to contain %q, got: %s", "Production", out)
 	}
 	if !strings.Contains(out, "Name:") {
 		t.Errorf("expected text output to contain %q, got: %s", "Name:", out)
@@ -335,11 +284,9 @@ func TestEnvGet_TextOutput(t *testing.T) {
 }
 
 func TestEnvGet_ByID(t *testing.T) {
-	// List doesn't find by name, so fallback to GetApp by ID
 	srv := newMockServer(t, map[string]string{
-		"ListApps": `{"data":{"apps":[]}}`,
-		"GetApp":   getAppResponse,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": listEnvsResponse,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -348,7 +295,7 @@ func TestEnvGet_ByID(t *testing.T) {
 	var cmdErr error
 	out := captureStdout(t, func() {
 		cmd := NewEnvCmd()
-		cmd.SetArgs([]string{"get", "app-1"})
+		cmd.SetArgs([]string{"get", "env-1"})
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 		cmd.SetErr(&buf)
@@ -359,8 +306,8 @@ func TestEnvGet_ByID(t *testing.T) {
 		t.Fatalf("unexpected error: %v", cmdErr)
 	}
 
-	if !strings.Contains(out, "my-app") {
-		t.Errorf("expected output to contain %q, got: %s", "my-app", out)
+	if !strings.Contains(out, "Production") {
+		t.Errorf("expected output to contain %q, got: %s", "Production", out)
 	}
 }
 
@@ -376,10 +323,45 @@ func TestEnvCmd_BareHelp(t *testing.T) {
 	}
 }
 
-func TestEnvList_Error(t *testing.T) {
+func TestEnvList_AuthError_Fallback(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListApps": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+	state.Config.ActiveEnv = "staging"
+	state.Output = testOutputJSON
+
+	var cmdErr error
+	out := captureStdout(t, func() {
+		cmd := NewEnvCmd()
+		cmd.SetArgs([]string{"list"})
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+		cmdErr = cmd.Execute()
+	})
+
+	if cmdErr != nil {
+		t.Fatalf("expected fallback (no error), got: %v", cmdErr)
+	}
+
+	if !strings.Contains(out, "staging") {
+		t.Errorf("expected fallback output to contain active env %q, got: %s", "staging", out)
+	}
+	if !strings.Contains(out, "local_config") {
+		t.Errorf("expected fallback output to contain %q, got: %s", "local_config", out)
+	}
+	if !strings.Contains(out, "https://app.inngest.com/env") {
+		t.Errorf("expected fallback output to contain dashboard link, got: %s", out)
+	}
+}
+
+func TestEnvList_NonAuthError(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListEnvs": `{"data":null,"errors":[{"message":"internal server error"}]}`,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
@@ -392,7 +374,7 @@ func TestEnvList_Error(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when ListApps fails")
+		t.Fatal("expected error when ListEnvironments fails with non-auth error")
 	}
 	if !strings.Contains(err.Error(), "listing environments") {
 		t.Errorf("expected error about listing environments, got: %v", err)
@@ -423,51 +405,79 @@ func TestEnvUse_SaveError(t *testing.T) {
 	}
 }
 
-func TestEnvGet_ListAppsError(t *testing.T) {
+func TestEnvGet_AuthError_Fallback(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListApps": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-	}, map[string]http.HandlerFunc{})
+		"ListEnvs": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+	state.Config.ActiveEnv = "production"
+	state.Output = testOutputJSON
+
+	var cmdErr error
+	out := captureStdout(t, func() {
+		cmd := NewEnvCmd()
+		cmd.SetArgs([]string{"get", "production"})
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+		cmdErr = cmd.Execute()
+	})
+
+	if cmdErr != nil {
+		t.Fatalf("expected fallback (no error), got: %v", cmdErr)
+	}
+
+	if !strings.Contains(out, "production") {
+		t.Errorf("expected fallback output to contain %q, got: %s", "production", out)
+	}
+	if !strings.Contains(out, "local_config") {
+		t.Errorf("expected fallback output to contain %q, got: %s", "local_config", out)
+	}
+}
+
+func TestEnvGet_NonAuthError(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListEnvs": `{"data":null,"errors":[{"message":"internal server error"}]}`,
+	}, nil)
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
 
 	cmd := NewEnvCmd()
-	cmd.SetArgs([]string{"get", "my-app"})
+	cmd.SetArgs([]string{"get", "production"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when ListApps fails")
+		t.Fatal("expected error when GetEnvironment fails with non-auth error")
 	}
-	if !strings.Contains(err.Error(), "listing environments") {
-		t.Errorf("expected error about listing environments, got: %v", err)
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error about not found, got: %v", err)
 	}
 }
 
-func TestPrintEnvDetail_WithError(t *testing.T) {
-	app := &inngest.App{
-		ID:            "app-123",
-		ExternalID:    "ext-456",
-		Name:          "my-app",
-		SDKLanguage:   "go",
-		SDKVersion:    "0.1.0",
-		Connected:     false,
-		FunctionCount: 0,
-		Error:         "connection refused",
+func TestPrintEnvDetail_Simple(t *testing.T) {
+	env := &inngest.Environment{
+		ID:   "env-123",
+		Name: "Production",
+		Slug: "production",
+		Type: "production",
 	}
 
 	got := captureStdout(t, func() {
-		if err := printEnvDetail(app); err != nil {
+		if err := printEnvDetail(env); err != nil {
 			t.Fatalf("printEnvDetail returned error: %v", err)
 		}
 	})
 
-	if !strings.Contains(got, "Error:") {
-		t.Errorf("expected output to contain 'Error:', got: %s", got)
+	if !strings.Contains(got, "Production") {
+		t.Errorf("expected output to contain 'Production', got: %s", got)
 	}
-	if !strings.Contains(got, "connection refused") {
-		t.Errorf("expected output to contain 'connection refused', got: %s", got)
+	if !strings.Contains(got, "env-123") {
+		t.Errorf("expected output to contain 'env-123', got: %s", got)
 	}
 }

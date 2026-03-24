@@ -2,7 +2,9 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,7 +18,7 @@ import (
 func NewEnvCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "env",
-		Short: "Manage environments (apps/deployments)",
+		Short: "Manage environments (workspaces)",
 		Long:  "List, inspect, and switch between Inngest environments.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -30,63 +32,54 @@ func NewEnvCmd() *cobra.Command {
 
 // envRow is used for table output of env list.
 type envRow struct {
-	Name      string
-	SDK       string
-	Framework string
-	URL       string
-	Connected string
-	Functions int
-	Active    string
+	Name   string
+	Slug   string
+	Type   string
+	ID     string
+	Active string
 }
 
 func newEnvListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List all environments (apps)",
-		Long:  "List all apps registered with Inngest Cloud or the local dev server.",
+		Short: "List all environments",
+		Long:  "List all environments registered with Inngest Cloud.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
 			ctx := context.Background()
 
-			apps, err := client.ListApps(ctx)
+			envs, err := client.ListEnvironments(ctx)
 			if err != nil {
+				if errors.Is(err, inngest.ErrAccountAuthRequired) {
+					return printCurrentEnvFallback(format, err)
+				}
 				return fmt.Errorf("listing environments: %w", err)
 			}
 
 			if format == output.FormatTable {
-				return printEnvTable(apps)
+				return printEnvTable(envs)
 			}
 
-			return output.Print(apps, format)
+			return output.Print(envs, format)
 		},
 	}
 }
 
-func printEnvTable(apps []inngest.App) error {
+func printEnvTable(envs []inngest.Environment) error {
 	activeEnv := state.Env
-	rows := make([]envRow, len(apps))
-	for i, app := range apps {
-		sdk := app.SDKLanguage
-		if app.SDKVersion != "" {
-			sdk += "/" + app.SDKVersion
-		}
-		connected := "no"
-		if app.Connected {
-			connected = "yes"
-		}
+	rows := make([]envRow, len(envs))
+	for i, env := range envs {
 		active := ""
-		if strings.EqualFold(app.Name, activeEnv) {
+		if strings.EqualFold(env.Name, activeEnv) || strings.EqualFold(env.Slug, activeEnv) {
 			active = "◀"
 		}
 		rows[i] = envRow{
-			Name:      app.Name,
-			SDK:       sdk,
-			Framework: app.Framework,
-			URL:       app.URL,
-			Connected: connected,
-			Functions: app.FunctionCount,
-			Active:    active,
+			Name:   env.Name,
+			Slug:   env.Slug,
+			Type:   env.Type,
+			ID:     env.ID,
+			Active: active,
 		}
 	}
 	return output.Print(rows, output.FormatTable)
@@ -117,8 +110,8 @@ func newEnvUseCmd() *cobra.Command {
 func newEnvGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <name-or-id>",
-		Short: "Get detailed environment (app) info",
-		Long:  "Fetch full environment details including connected status and all functions.",
+		Short: "Get environment details",
+		Long:  "Fetch environment details by name, slug, or ID.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
@@ -126,75 +119,50 @@ func newEnvGetCmd() *cobra.Command {
 			ctx := context.Background()
 			nameOrID := args[0]
 
-			// Try to find by name first by listing all apps.
-			apps, err := client.ListApps(ctx)
+			env, err := client.GetEnvironment(ctx, nameOrID)
 			if err != nil {
-				return fmt.Errorf("listing environments: %w", err)
-			}
-
-			var app *inngest.App
-			for i := range apps {
-				if strings.EqualFold(apps[i].Name, nameOrID) || apps[i].ID == nameOrID {
-					app = &apps[i]
-					break
+				if errors.Is(err, inngest.ErrAccountAuthRequired) {
+					return printCurrentEnvFallback(format, err)
 				}
-			}
-
-			// If not found by name, try by ID via GetApp.
-			if app == nil {
-				app, err = client.GetApp(ctx, nameOrID)
-				if err != nil {
-					return fmt.Errorf("environment %q not found", nameOrID)
-				}
-			} else {
-				// Fetch full details with functions/triggers via GetApp.
-				detailed, err := client.GetApp(ctx, app.ID)
-				if err == nil {
-					app = detailed
-				}
+				return fmt.Errorf("environment %q not found: %w", nameOrID, err)
 			}
 
 			if format == output.FormatText {
-				return printEnvDetail(app)
+				return printEnvDetail(env)
 			}
 
-			return output.Print(app, format)
+			return output.Print(env, format)
 		},
 	}
 }
 
-func printEnvDetail(app *inngest.App) error {
-	fmt.Printf("Name:          %s\n", app.Name)
-	fmt.Printf("ID:            %s\n", app.ID)
-	fmt.Printf("External ID:   %s\n", app.ExternalID)
-	fmt.Printf("SDK:           %s/%s\n", app.SDKLanguage, app.SDKVersion)
-	if app.Framework != "" {
-		fmt.Printf("Framework:     %s\n", app.Framework)
+func printEnvDetail(env *inngest.Environment) error {
+	fmt.Printf("Name:          %s\n", env.Name)
+	fmt.Printf("ID:            %s\n", env.ID)
+	fmt.Printf("Slug:          %s\n", env.Slug)
+	fmt.Printf("Type:          %s\n", env.Type)
+	if env.CreatedAt != nil {
+		fmt.Printf("Created:       %s\n", env.CreatedAt.Format("2006-01-02 15:04:05"))
 	}
-	if app.URL != "" {
-		fmt.Printf("URL:           %s\n", app.URL)
-	}
-	if app.Method != "" {
-		fmt.Printf("Method:        %s\n", app.Method)
-	}
-	fmt.Printf("Connected:     %v\n", app.Connected)
-	fmt.Printf("Functions:     %d\n", app.FunctionCount)
-	if app.Checksum != "" {
-		fmt.Printf("Checksum:      %s\n", app.Checksum)
-	}
-	if app.Error != "" {
-		fmt.Printf("Error:         %s\n", app.Error)
-	}
-
-	if len(app.Functions) > 0 {
-		fmt.Printf("\nFunctions:\n")
-		for _, fn := range app.Functions {
-			fmt.Printf("  - %s (%s)\n", fn.Name, fn.Slug)
-			for _, t := range fn.Triggers {
-				fmt.Printf("      trigger: %s:%s\n", t.Type, t.Value)
-			}
-		}
-	}
-
+	fmt.Printf("Auto-Archive:  %v\n", env.IsAutoArchiveEnabled)
 	return nil
+}
+
+// printCurrentEnvFallback shows the current environment from config when the
+// API requires account-level auth that we don't have. It prints a warning to
+// stderr, then outputs the locally-known environment info to stdout.
+func printCurrentEnvFallback(format output.Format, authErr error) error {
+	activeEnv := state.Config.GetActiveEnv()
+
+	// Print warning to stderr so structured output on stdout stays clean.
+	fmt.Fprintln(os.Stderr, "Warning: "+authErr.Error())
+	fmt.Fprintln(os.Stderr, "Showing current environment from local config instead.")
+	fmt.Fprintln(os.Stderr)
+
+	info := map[string]string{
+		"active_env": activeEnv,
+		"source":     "local_config",
+		"hint":       "Visit https://app.inngest.com/env to manage all environments",
+	}
+	return output.Print(info, format)
 }

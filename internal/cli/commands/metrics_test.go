@@ -166,7 +166,7 @@ func TestHealth_NoSigningKey(t *testing.T) {
 func TestMetrics_Success(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"},{"node":{"id":"r2","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:02Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c2"},{"node":{"id":"r3","status":"FAILED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn2","slug":"fn2"}},"cursor":"c3"},{"node":{"id":"r4","status":"RUNNING","function":{"name":"fn1","slug":"fn1"}},"cursor":"c4"}],"pageInfo":{"hasNextPage":false},"totalCount":4}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r2","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r3","status":"FAILED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn2","name":"fn2","slug":"fn2"}},{"id":"r4","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -218,7 +218,7 @@ func TestMetrics_Success(t *testing.T) {
 func TestBacklog_WithRuns(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c1"},{"node":{"id":"r2","status":"QUEUED","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -260,7 +260,7 @@ func TestBacklog_WithRuns(t *testing.T) {
 func TestBacklog_Empty(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+			"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
 		},
 		nil,
 	)
@@ -298,7 +298,7 @@ func TestBacklog_Empty(t *testing.T) {
 func TestMetrics_TextOutput(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false},"totalCount":1}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -338,7 +338,7 @@ func TestMetrics_TextOutput(t *testing.T) {
 func TestMetrics_WithFunctionFilter(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false},"totalCount":1}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn-123","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -445,7 +445,7 @@ func TestHealth_TextOutput(t *testing.T) {
 func TestBacklog_TextOutput(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+			"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
 		},
 		nil,
 	)
@@ -482,7 +482,7 @@ func TestBacklog_TextOutput(t *testing.T) {
 func TestBacklog_TextWithEntries(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c1"},{"node":{"id":"r2","status":"QUEUED","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -519,7 +519,7 @@ func TestBacklog_TextWithEntries(t *testing.T) {
 func TestBacklog_UnknownFunction(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING"},"cursor":"c1"}],"pageInfo":{"hasNextPage":false},"totalCount":1}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}"}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -555,11 +555,11 @@ func TestBacklog_UnknownFunction(t *testing.T) {
 }
 
 func TestMetrics_Truncated(t *testing.T) {
-	// Simulate pagination that returns hasNextPage=true for maxPages pages.
-	// The mock will always say hasNextPage=true so the metrics loop hits the truncation limit.
+	// With the events-based API, ListRuns always returns HasNextPage=false,
+	// so truncation is no longer triggered. This test verifies a single page is returned.
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"totalCount":100}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -593,15 +593,16 @@ func TestMetrics_Truncated(t *testing.T) {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if truncated, ok := result["truncated"].(bool); !ok || !truncated {
-		t.Errorf("expected truncated=true, got %v", result["truncated"])
+	// With events-based API, truncation no longer happens since ListRuns returns all runs in one page.
+	if total, ok := result["total"].(float64); !ok || total != 1 {
+		t.Errorf("expected total=1, got %v", result["total"])
 	}
 }
 
 func TestMetrics_TextTruncated(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"COMPLETED","startedAt":"2024-01-01T00:00:00Z","endedAt":"2024-01-01T00:00:01Z","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"totalCount":100}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -630,8 +631,9 @@ func TestMetrics_TextTruncated(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "truncated") {
-		t.Errorf("expected text output to contain 'truncated', got: %s", got)
+	// With events-based API, truncation no longer happens. Just verify text output has metrics content.
+	if !strings.Contains(got, "Total runs") {
+		t.Errorf("expected text output to contain 'Total runs', got: %s", got)
 	}
 	if !strings.Contains(got, "Duration") {
 		t.Errorf("expected text output to contain 'Duration', got: %s", got)
@@ -641,7 +643,7 @@ func TestMetrics_TextTruncated(t *testing.T) {
 func TestBacklog_TableOutput(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c1"},{"node":{"id":"r2","status":"QUEUED","function":{"name":"Process Payment","slug":"fn1"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -893,7 +895,7 @@ func TestBacklog_TruncatedJSON(t *testing.T) {
 	// Two different functions so sort.Slice comparison executes.
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Func A","slug":"fn-a"}},"cursor":"c1"},{"node":{"id":"r2","status":"QUEUED","function":{"name":"Func B","slug":"fn-b"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":true,"endCursor":"c2"},"totalCount":100}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn-a","name":"Func A","slug":"fn-a"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn-b","name":"Func B","slug":"fn-b"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -927,12 +929,9 @@ func TestBacklog_TruncatedJSON(t *testing.T) {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	// The truncated flag should be set (pagination limit reached).
-	if trunc, ok := result["truncated"].(bool); !ok || !trunc {
-		t.Errorf("expected truncated=true, got %v", result["truncated"])
-	}
-	if _, ok := result["truncatedAt"]; !ok {
-		t.Error("expected 'truncatedAt' key in truncated JSON output")
+	// With events-based API, truncation no longer happens. Verify entries are present.
+	if _, ok := result["entries"]; !ok {
+		t.Error("expected 'entries' key in output")
 	}
 	// Both function names should appear.
 	if !strings.Contains(got, "Func A") {
@@ -948,7 +947,7 @@ func TestBacklog_TruncatedJSON(t *testing.T) {
 func TestBacklog_TruncatedText(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Func A","slug":"fn-a"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"totalCount":100}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn-a","name":"Func A","slug":"fn-a"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -977,9 +976,7 @@ func TestBacklog_TruncatedText(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "truncated") {
-		t.Errorf("expected text output to contain 'truncated', got: %s", got)
-	}
+	// With events-based API, truncation no longer happens. Just verify function name is present.
 	if !strings.Contains(got, "Func A") {
 		t.Errorf("expected text output to contain 'Func A', got: %s", got)
 	}
@@ -991,7 +988,7 @@ func TestMetrics_NoDurations(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
 			// Runs without startedAt/endedAt → no duration samples.
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"fn1","slug":"fn1"}},"cursor":"c1"},{"node":{"id":"r2","status":"QUEUED","function":{"name":"fn1","slug":"fn1"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)
@@ -1042,7 +1039,7 @@ func TestMetrics_NoDurations(t *testing.T) {
 func TestBacklog_TableWithEntries(t *testing.T) {
 	srv := newMockServer(t,
 		map[string]string{
-			"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"r1","status":"RUNNING","function":{"name":"Func A","slug":"fn-a"}},"cursor":"c1"},{"node":{"id":"r2","status":"RUNNING","function":{"name":"Func B","slug":"fn-b"}},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn-a","name":"Func A","slug":"fn-a"}},{"id":"r2","status":"RUNNING","output":"{}","function":{"id":"fn-b","name":"Func B","slug":"fn-b"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
 		},
 		nil,
 	)

@@ -120,7 +120,7 @@ func newEventsGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <event-id>",
 		Short: "Get event details and triggered runs",
-		Long:  "Fetch event details and the runs it triggered. Uses GraphQL for full details, falls back to REST for runs.",
+		Long:  "Fetch event details and the runs it triggered. Searches recent events across all event types, falls back to REST for runs.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
@@ -129,7 +129,7 @@ func newEventsGetCmd() *cobra.Command {
 
 			eventID := args[0]
 
-			// Try GraphQL first for full event details.
+			// Try GraphQL first — searches recent events across all types.
 			event, err := client.GetEvent(ctx, eventID)
 			if err == nil {
 				return output.Print(event, format)
@@ -150,93 +150,64 @@ func newEventsGetCmd() *cobra.Command {
 }
 
 func newEventsListCmd() *cobra.Command {
-	var limit int
+	var recentCount int
 	var name string
-	var since string
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List recent events from Inngest Cloud",
-		Long:  "Query recent events via GraphQL. Requires signing key auth.",
+		Short: "List event types from Inngest Cloud",
+		Long:  "Query event types and their recent instances via GraphQL. Requires signing key auth.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
 			ctx := context.Background()
 
-			duration, err := time.ParseDuration(since)
-			if err != nil {
-				return fmt.Errorf("invalid --since duration %q: %w", since, err)
-			}
-			fromTime := time.Now().Add(-duration)
-
-			conn, err := client.ListEvents(ctx, inngest.ListEventsOptions{
-				First: limit,
-				Name:  name,
-				Since: fromTime,
+			result, err := client.ListEvents(ctx, inngest.ListEventsOptions{
+				Name:        name,
+				RecentCount: recentCount,
 			})
 			if err != nil {
 				return fmt.Errorf("listing events: %w", err)
 			}
 
-			events := make([]inngest.Event, len(conn.Edges))
-			for i, edge := range conn.Edges {
-				events[i] = edge.Node
-			}
-
 			return output.Print(map[string]any{
-				"events":     events,
-				"totalCount": conn.TotalCount,
+				"eventTypes": result.Data,
+				"page":       result.Page,
 			}, format)
 		},
 	}
 
-	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of events to return")
+	cmd.Flags().IntVar(&recentCount, "recent", 5, "Number of recent event instances per type")
 	cmd.Flags().StringVar(&name, "name", "", "Filter by event name")
-	cmd.Flags().StringVar(&since, "since", "24h", "Show events since this duration ago (e.g. 1h, 30m, 24h)")
 
 	return cmd
 }
 
 func newEventsTypesCmd() *cobra.Command {
-	var since string
-
 	cmd := &cobra.Command{
 		Use:   "types",
-		Short: "List unique event names seen recently",
-		Long:  "Query recent events and extract distinct event names.",
+		Short: "List unique event type names",
+		Long:  "Query event types from Inngest Cloud and list their names.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
 			ctx := context.Background()
 
-			duration, err := time.ParseDuration(since)
-			if err != nil {
-				return fmt.Errorf("invalid --since duration %q: %w", since, err)
-			}
-			fromTime := time.Now().Add(-duration)
-
-			conn, err := client.ListEvents(ctx, inngest.ListEventsOptions{
-				First: 100,
-				Since: fromTime,
+			result, err := client.ListEvents(ctx, inngest.ListEventsOptions{
+				RecentCount: 0,
 			})
 			if err != nil {
 				return fmt.Errorf("listing events: %w", err)
 			}
 
-			seen := map[string]bool{}
-			var names []string
-			for _, edge := range conn.Edges {
-				if !seen[edge.Node.Name] {
-					seen[edge.Node.Name] = true
-					names = append(names, edge.Node.Name)
-				}
+			names := make([]string, len(result.Data))
+			for i, et := range result.Data {
+				names[i] = et.Name
 			}
 
 			return output.Print(names, format)
 		},
 	}
-
-	cmd.Flags().StringVar(&since, "since", "24h", "Look back this duration for event types (e.g. 1h, 24h, 72h)")
 
 	return cmd
 }

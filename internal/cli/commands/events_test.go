@@ -88,22 +88,17 @@ func TestEventsGetNoArgError(t *testing.T) {
 	}
 }
 
-func TestEventsListInvalidSince(t *testing.T) {
-	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = testOutputJSON
-
+func TestEventsListFlags(t *testing.T) {
 	cmd := NewEventsCmd()
-	cmd.SetArgs([]string{"list", "--since", "notaduration"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for invalid --since duration")
+	listCmd, _, _ := cmd.Find([]string{"list"})
+	if listCmd == nil {
+		t.Fatal("expected list subcommand")
 	}
-	if !strings.Contains(err.Error(), "invalid") {
-		t.Errorf("expected error about invalid duration, got: %v", err)
+	if f := listCmd.Flags().Lookup("recent"); f == nil {
+		t.Error("expected --recent flag on list command")
+	}
+	if f := listCmd.Flags().Lookup("name"); f == nil {
+		t.Error("expected --name flag on list command")
 	}
 }
 
@@ -328,7 +323,7 @@ func TestEventsSend_InvalidData(t *testing.T) {
 
 func TestEventsGet_GraphQLSuccess(t *testing.T) {
 	gqlResponses := map[string]string{
-		"GetEvent": `{"data":{"event":{"id":"evt-1","name":"test/event","raw":"{\"name\":\"test/event\"}","runs":[{"id":"run-1","status":"COMPLETED","function":{"name":"My Func"}}]}}}`,
+		"GetEvent": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","name":"test/event","event":"{\"name\":\"test/event\"}","functionRuns":[{"id":"run-1","status":"COMPLETED","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}]}}}`,
 	}
 	srv := newMockServer(t, gqlResponses, nil)
 	defer srv.Close()
@@ -436,7 +431,7 @@ func TestEventsGet_BothFail(t *testing.T) {
 
 func TestEventsList_Success(t *testing.T) {
 	gqlResponses := map[string]string{
-		"ListEvents": `{"data":{"eventsV2":{"edges":[{"node":{"id":"evt-1","name":"test/event","raw":"{}"},"cursor":"c1"},{"node":{"id":"evt-2","name":"other/event","raw":"{}"},"cursor":"c2"}],"pageInfo":{"hasNextPage":false},"totalCount":2}}}`,
+		"ListEvents": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","name":"test/event","event":"{}"}]},{"name":"other/event","recent":[{"id":"evt-2","name":"other/event","event":"{}"}]}],"page":{"page":1,"perPage":20,"totalItems":2,"totalPages":1}}}}`,
 	}
 	srv := newMockServer(t, gqlResponses, nil)
 	defer srv.Close()
@@ -474,7 +469,7 @@ func TestEventsList_Success(t *testing.T) {
 
 func TestEventsTypes_Success(t *testing.T) {
 	gqlResponses := map[string]string{
-		"ListEvents": `{"data":{"eventsV2":{"edges":[{"node":{"id":"e1","name":"test/event"},"cursor":"c1"},{"node":{"id":"e2","name":"other/event"},"cursor":"c2"},{"node":{"id":"e3","name":"test/event"},"cursor":"c3"}],"pageInfo":{"hasNextPage":false},"totalCount":3}}}`,
+		"ListEvents": `{"data":{"events":{"data":[{"name":"test/event"},{"name":"other/event"}],"page":{"page":1,"perPage":20,"totalItems":2,"totalPages":1}}}}`,
 	}
 	srv := newMockServer(t, gqlResponses, nil)
 	defer srv.Close()
@@ -507,12 +502,6 @@ func TestEventsTypes_Success(t *testing.T) {
 	}
 	if !strings.Contains(got, "other/event") {
 		t.Errorf("expected output to contain \"other/event\", got: %s", got)
-	}
-	// Verify deduplication: count occurrences of event names in JSON output.
-	// The JSON array should have exactly 2 entries.
-	count := strings.Count(got, "test/event")
-	if count != 1 {
-		t.Errorf("expected exactly 1 occurrence of \"test/event\" (deduped), got %d in: %s", count, got)
 	}
 }
 
@@ -610,25 +599,6 @@ func TestEventsList_Error(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "listing events") {
 		t.Errorf("expected error about listing events, got: %v", err)
-	}
-}
-
-func TestEventsTypes_InvalidSince(t *testing.T) {
-	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = testOutputJSON
-
-	cmd := NewEventsCmd()
-	cmd.SetArgs([]string{"types", "--since", "notaduration"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for invalid --since duration")
-	}
-	if !strings.Contains(err.Error(), "invalid --since") {
-		t.Errorf("expected error about invalid --since, got: %v", err)
 	}
 }
 

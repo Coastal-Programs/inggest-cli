@@ -83,7 +83,7 @@ func (c *Client) SendDevEvent(ctx context.Context, eventData any) ([]string, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.do(req)
+	resp, err := c.doEvent(req)
 	if err != nil {
 		return nil, fmt.Errorf("inngest: send event request: %w", err)
 	}

@@ -245,18 +245,26 @@ func printTraceSpan(span *inngest.RunTraceSpan, indent string) {
 }
 
 func newRunsCancelCmd() *cobra.Command {
-	var force bool
+	var (
+		force bool
+		envID string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "cancel <run-id>",
 		Short: "Cancel a running function",
-		Long:  "Cancel a currently running function execution.",
+		Long:  "Cancel a currently running function execution. Requires an environment ID via --env-id flag or INNGEST_ENV_ID env var.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
 			ctx := context.Background()
 			runID := args[0]
+
+			// Fall back to INNGEST_ENV_ID env var if --env-id not provided.
+			if envID == "" {
+				envID = os.Getenv("INNGEST_ENV_ID")
+			}
 
 			if !force {
 				fmt.Fprintf(os.Stderr, "Cancel run %s? [y/N] ", runID)
@@ -268,7 +276,7 @@ func newRunsCancelCmd() *cobra.Command {
 				}
 			}
 
-			run, err := client.CancelRun(ctx, runID)
+			run, err := client.CancelRun(ctx, envID, runID)
 			if err != nil {
 				return fmt.Errorf("cancelling run: %w", err)
 			}
@@ -281,6 +289,7 @@ func newRunsCancelCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "Skip confirmation prompt")
+	cmd.Flags().StringVar(&envID, "env-id", "", "Inngest environment UUID (or set INNGEST_ENV_ID)")
 
 	return cmd
 }

@@ -8,27 +8,54 @@ import (
 	"testing"
 )
 
-const testSendEmailSlug = "send-email"
+const (
+	testSendEmailSlug   = "send-email"
+	testExternalIDMyApp = "my-app"
+)
 
 func TestListFunctions(t *testing.T) {
 	response := `{
 		"data": {
-			"functions": [
-				{
-					"id": "fn-1",
-					"name": "Send Email",
-					"slug": "send-email",
-					"appID": "app-1",
-					"triggers": [{"type": "event", "value": "user/signup"}]
-				},
-				{
-					"id": "fn-2",
-					"name": "Process Order",
-					"slug": "process-order",
-					"appID": "app-1",
-					"triggers": [{"type": "cron", "value": "0 * * * *"}]
-				}
-			]
+			"events": {
+				"data": [
+					{
+						"workflows": [
+							{
+								"id": "fn-1",
+								"name": "Send Email",
+								"slug": "send-email",
+								"isPaused": false,
+								"isArchived": false,
+								"triggers": [{"type": "event", "value": "user/signup"}],
+								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
+							},
+							{
+								"id": "fn-2",
+								"name": "Process Order",
+								"slug": "process-order",
+								"isPaused": false,
+								"isArchived": false,
+								"triggers": [{"type": "cron", "value": "0 * * * *"}],
+								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
+							}
+						]
+					},
+					{
+						"workflows": [
+							{
+								"id": "fn-1",
+								"name": "Send Email",
+								"slug": "send-email",
+								"isPaused": false,
+								"isArchived": false,
+								"triggers": [{"type": "event", "value": "user/signup"}],
+								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
+							}
+						]
+					}
+				],
+				"page": {"page": 1, "totalPages": 1}
+			}
 		}
 	}`
 
@@ -47,16 +74,16 @@ func TestListFunctions(t *testing.T) {
 	}
 
 	// Verify the request contained the expected query.
-	if !strings.Contains(captured.Query, "functions") {
-		t.Errorf("expected query to contain 'functions', got: %s", captured.Query)
+	if !strings.Contains(captured.Query, "events") {
+		t.Errorf("expected query to contain 'events', got: %s", captured.Query)
 	}
-	if captured.Variables != nil {
-		t.Errorf("expected nil variables for ListFunctions, got: %v", captured.Variables)
+	if !strings.Contains(captured.Query, "workflows") {
+		t.Errorf("expected query to contain 'workflows', got: %s", captured.Query)
 	}
 
-	// Verify the returned functions.
+	// Verify deduplication: fn-1 appears in two event types but should be returned once.
 	if len(fns) != 2 {
-		t.Fatalf("expected 2 functions, got %d", len(fns))
+		t.Fatalf("expected 2 functions (deduplicated), got %d", len(fns))
 	}
 
 	// First function.
@@ -69,8 +96,8 @@ func TestListFunctions(t *testing.T) {
 	if fns[0].Slug != "send-email" {
 		t.Errorf("expected first function Slug 'send-email', got %q", fns[0].Slug)
 	}
-	if fns[0].AppID != testAppID1 {
-		t.Errorf("expected first function AppID 'app-1', got %q", fns[0].AppID)
+	if fns[0].App == nil || fns[0].App.ID != testAppID1 {
+		t.Errorf("expected first function App.ID 'app-1', got %v", fns[0].App)
 	}
 	if len(fns[0].Triggers) != 1 {
 		t.Fatalf("expected 1 trigger on first function, got %d", len(fns[0].Triggers))
@@ -92,9 +119,6 @@ func TestListFunctions(t *testing.T) {
 	if fns[1].Slug != "process-order" {
 		t.Errorf("expected second function Slug 'process-order', got %q", fns[1].Slug)
 	}
-	if fns[1].AppID != testAppID1 {
-		t.Errorf("expected second function AppID 'app-1', got %q", fns[1].AppID)
-	}
 	if len(fns[1].Triggers) != 1 {
 		t.Fatalf("expected 1 trigger on second function, got %d", len(fns[1].Triggers))
 	}
@@ -107,7 +131,7 @@ func TestListFunctions(t *testing.T) {
 }
 
 func TestListFunctions_Empty(t *testing.T) {
-	response := `{"data": {"functions": []}}`
+	response := `{"data": {"events": {"data": [], "page": {"page": 1, "totalPages": 0}}}}`
 
 	srv := newTestServer(t, response, nil)
 	defer srv.Close()
@@ -132,29 +156,34 @@ func TestListFunctions_Empty(t *testing.T) {
 func TestGetFunction(t *testing.T) {
 	response := `{
 		"data": {
-			"functionBySlug": {
-				"id": "fn-1",
-				"name": "Send Email",
-				"slug": "send-email",
-				"appID": "app-1",
-				"url": "https://example.com/api/inngest",
-				"config": "{\"id\":\"send-email\"}",
-				"concurrency": 5,
-				"triggers": [
-					{"type": "event", "value": "user/signup", "condition": "event.data.active == true"}
+			"events": {
+				"data": [
+					{
+						"workflows": [
+							{
+								"id": "fn-1",
+								"name": "Send Email",
+								"slug": "send-email",
+								"url": "https://example.com/api/inngest",
+								"isPaused": false,
+								"isArchived": false,
+								"triggers": [
+									{"type": "event", "value": "user/signup", "condition": "event.data.active == true"}
+								],
+								"configuration": {
+									"retries": {"value": 3, "isDefault": false}
+								},
+								"app": {
+									"id": "app-1",
+									"name": "My App",
+									"externalID": "my-app",
+									"appVersion": "1.0.0"
+								}
+							}
+						]
+					}
 				],
-				"configuration": {
-					"retries": {"value": 3, "isDefault": false}
-				},
-				"app": {
-					"id": "app-1",
-					"name": "My App",
-					"sdkLanguage": "go",
-					"sdkVersion": "0.7.0",
-					"framework": "gin",
-					"url": "https://example.com/api/inngest",
-					"connected": true
-				}
+				"page": {"page": 1, "totalPages": 1}
 			}
 		}
 	}`
@@ -173,17 +202,9 @@ func TestGetFunction(t *testing.T) {
 		t.Fatalf("GetFunction returned error: %v", err)
 	}
 
-	// Verify the request contained the slug variable.
-	if !strings.Contains(captured.Query, "functionBySlug") {
-		t.Errorf("expected query to contain 'functionBySlug', got: %s", captured.Query)
-	}
-	if captured.Variables == nil {
-		t.Fatal("expected variables to be non-nil")
-	}
-	if slug, ok := captured.Variables["slug"]; !ok {
-		t.Error("expected 'slug' variable in request")
-	} else if slug != "send-email" {
-		t.Errorf("expected slug variable 'send-email', got %v", slug)
+	// Verify the request uses the events/workflows pattern.
+	if !strings.Contains(captured.Query, "events") {
+		t.Errorf("expected query to contain 'events', got: %s", captured.Query)
 	}
 
 	// Verify all fields on the returned function.
@@ -199,17 +220,14 @@ func TestGetFunction(t *testing.T) {
 	if fn.Slug != testSendEmailSlug {
 		t.Errorf("expected Slug 'send-email', got %q", fn.Slug)
 	}
-	if fn.AppID != testAppID1 {
-		t.Errorf("expected AppID 'app-1', got %q", fn.AppID)
-	}
 	if fn.URL != testAppURL {
 		t.Errorf("expected URL 'https://example.com/api/inngest', got %q", fn.URL)
 	}
-	if fn.Config != `{"id":"send-email"}` {
-		t.Errorf("expected Config '{\"id\":\"send-email\"}', got %q", fn.Config)
+	if fn.IsPaused {
+		t.Errorf("expected IsPaused false, got true")
 	}
-	if fn.Concurrency != 5 {
-		t.Errorf("expected Concurrency 5, got %d", fn.Concurrency)
+	if fn.IsArchived {
+		t.Errorf("expected IsArchived false, got true")
 	}
 
 	// Triggers.
@@ -251,25 +269,16 @@ func TestGetFunction(t *testing.T) {
 	if fn.App.Name != testMyApp {
 		t.Errorf("expected App.Name 'My App', got %q", fn.App.Name)
 	}
-	if fn.App.SDKLanguage != "go" {
-		t.Errorf("expected App.SDKLanguage 'go', got %q", fn.App.SDKLanguage)
+	if fn.App.ExternalID != testExternalIDMyApp {
+		t.Errorf("expected App.ExternalID %q, got %q", testExternalIDMyApp, fn.App.ExternalID)
 	}
-	if fn.App.SDKVersion != "0.7.0" {
-		t.Errorf("expected App.SDKVersion '0.7.0', got %q", fn.App.SDKVersion)
-	}
-	if fn.App.Framework != "gin" {
-		t.Errorf("expected App.Framework 'gin', got %q", fn.App.Framework)
-	}
-	if fn.App.URL != testAppURL {
-		t.Errorf("expected App.URL 'https://example.com/api/inngest', got %q", fn.App.URL)
-	}
-	if fn.App.Connected != true {
-		t.Errorf("expected App.Connected true, got %v", fn.App.Connected)
+	if fn.App.AppVersion != "1.0.0" {
+		t.Errorf("expected App.AppVersion '1.0.0', got %q", fn.App.AppVersion)
 	}
 }
 
 func TestGetFunction_NotFound(t *testing.T) {
-	response := `{"data": {"functionBySlug": null}}`
+	response := `{"data": {"events": {"data": [], "page": {"page": 1, "totalPages": 0}}}}`
 
 	srv := newTestServer(t, response, nil)
 	defer srv.Close()

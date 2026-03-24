@@ -54,9 +54,8 @@ func TestPrintFunctionsTable(t *testing.T) {
 				{Type: "cron", Value: "0 * * * *"},
 			},
 			App: &inngest.App{
-				Name:        "billing-app",
-				SDKLanguage: "typescript",
-				SDKVersion:  "3.0.0",
+				Name:       "billing-app",
+				ExternalID: "billing-app",
 			},
 		},
 		{
@@ -66,8 +65,8 @@ func TestPrintFunctionsTable(t *testing.T) {
 				{Type: "event", Value: "user/signup"},
 			},
 			App: &inngest.App{
-				Name:        "notifications",
-				SDKLanguage: "go",
+				Name:       "notifications",
+				ExternalID: "notifications",
 			},
 		},
 	}
@@ -85,22 +84,21 @@ func TestPrintFunctionsTableEmpty(t *testing.T) {
 
 func TestPrintFunctionDetail(t *testing.T) {
 	fn := &inngest.Function{
-		ID:          "fn-123",
-		Name:        "Process Payment",
-		Slug:        "process-payment",
-		AppID:       "app-456",
-		URL:         "https://example.com/api/inngest",
-		Concurrency: 5,
+		ID:         "fn-123",
+		Name:       "Process Payment",
+		Slug:       "process-payment",
+		URL:        "https://example.com/api/inngest",
+		IsPaused:   false,
+		IsArchived: false,
 		Triggers: []inngest.FunctionTrigger{
 			{Type: "event", Value: "payment/created", Condition: "event.data.amount > 100"},
 			{Type: "cron", Value: "0 * * * *"},
 		},
 		App: &inngest.App{
-			Name:        "billing-app",
-			SDKLanguage: "typescript",
-			SDKVersion:  "3.0.0",
-			Framework:   "nextjs",
-			Connected:   true,
+			ID:         "app-456",
+			Name:       "billing-app",
+			ExternalID: "billing-app",
+			AppVersion: "2.0.0",
 		},
 		Configuration: &inngest.FunctionConfiguration{
 			Retries: &inngest.RetryConfig{Value: 3, IsDefault: false},
@@ -133,9 +131,8 @@ func TestPrintFunctionDetailMinimal(t *testing.T) {
 
 func TestBuildConfigOutput(t *testing.T) {
 	fn := &inngest.Function{
-		Slug:   testSlug,
-		Name:   "Test",
-		Config: `{"retries":3}`,
+		Slug: testSlug,
+		Name: "Test",
 		Configuration: &inngest.FunctionConfiguration{
 			Retries: &inngest.RetryConfig{Value: 3, IsDefault: false},
 		},
@@ -143,7 +140,7 @@ func TestBuildConfigOutput(t *testing.T) {
 
 	result := buildConfigOutput(fn)
 
-	for _, key := range []string{"slug", "name", "configuration", "rawConfig"} {
+	for _, key := range []string{"slug", "name", "configuration"} {
 		if _, ok := result[key]; !ok {
 			t.Errorf("buildConfigOutput missing key %q", key)
 		}
@@ -174,20 +171,19 @@ func TestBuildConfigOutputNoConfig(t *testing.T) {
 	if _, ok := result["configuration"]; ok {
 		t.Error("buildConfigOutput should not have \"configuration\" key when Configuration is nil")
 	}
-	if _, ok := result["rawConfig"]; ok {
-		t.Error("buildConfigOutput should not have \"rawConfig\" key when Config is empty")
-	}
 }
 
 // ---------------------------------------------------------------------------
 // Integration tests using mock GraphQL server
 // ---------------------------------------------------------------------------
 
-const listFunctionsResponse = `{"data":{"functions":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","triggers":[{"type":"event","value":"payment/created"}],"app":{"id":"app-1","name":"billing-app","sdkLanguage":"typescript","sdkVersion":"3.0.0"}},{"id":"fn-2","name":"Send Email","slug":"send-email","triggers":[{"type":"event","value":"user/signup"}],"app":{"id":"app-1","name":"billing-app","sdkLanguage":"typescript","sdkVersion":"3.0.0"}}]}}`
+// Both ListFunctions and GetFunction use the "ListFunctions" operation name,
+// since GetFunction calls ListFunctions internally.
+const listFunctionsResponse = `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"payment/created"}],"app":{"id":"app-1","name":"billing-app","externalID":"billing-app"}},{"id":"fn-2","name":"Send Email","slug":"send-email","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"user/signup"}],"app":{"id":"app-1","name":"billing-app","externalID":"billing-app"}}]}],"page":{"page":1,"totalPages":1}}}}`
 
-const getFunctionResponse = `{"data":{"functionBySlug":{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","concurrency":5,"triggers":[{"type":"event","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1","name":"billing-app","sdkLanguage":"typescript","sdkVersion":"3.0.0","connected":true}}}}`
+const getFunctionResponse = `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1","name":"billing-app","externalID":"billing-app","appVersion":"1.0.0"}}]}],"page":{"page":1,"totalPages":1}}}}`
 
-const getFunctionWithConfigResponse = `{"data":{"functionBySlug":{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","concurrency":5,"config":"{\"retries\":3}","triggers":[{"type":"event","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1","name":"billing-app","sdkLanguage":"typescript","sdkVersion":"3.0.0","connected":true}}}}`
+const getFunctionWithConfigResponse = `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1","name":"billing-app","externalID":"billing-app","appVersion":"1.0.0"}}]}],"page":{"page":1,"totalPages":1}}}}`
 
 // setupFunctionsTestState configures global state for cloud-mode tests.
 func setupFunctionsTestState(t *testing.T, srvURL string) {
@@ -246,8 +242,6 @@ func TestFunctionsList_AppFilter(t *testing.T) {
 		"ListFunctions": listFunctionsResponse,
 	}, nil)
 	defer srv.Close()
-
-	setupFunctionsTestState(t, srv.URL)
 
 	// Both functions belong to "billing-app", so --app billing-app should return 2.
 	t.Run("matching app", func(t *testing.T) {
@@ -336,8 +330,9 @@ func TestFunctionsList_Table(t *testing.T) {
 }
 
 func TestFunctionsGet_Success(t *testing.T) {
+	// GetFunction calls ListFunctions internally, so use same operation name.
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": getFunctionResponse,
+		"ListFunctions": getFunctionResponse,
 	}, nil)
 	defer srv.Close()
 
@@ -366,14 +361,11 @@ func TestFunctionsGet_Success(t *testing.T) {
 	if fn.Slug != "process-payment" {
 		t.Errorf("expected function slug %q, got %q", "process-payment", fn.Slug)
 	}
-	if fn.Concurrency != 5 {
-		t.Errorf("expected concurrency %d, got %d", 5, fn.Concurrency)
-	}
 }
 
 func TestFunctionsConfig_JSON(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": getFunctionWithConfigResponse,
+		"ListFunctions": getFunctionWithConfigResponse,
 	}, nil)
 	defer srv.Close()
 
@@ -412,7 +404,7 @@ func TestFunctionsConfig_JSON(t *testing.T) {
 
 func TestFunctionsConfig_Text(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": getFunctionWithConfigResponse,
+		"ListFunctions": getFunctionWithConfigResponse,
 	}, nil)
 	defer srv.Close()
 
@@ -452,24 +444,9 @@ func TestFunctionsCmd_BareHelp(t *testing.T) {
 	}
 }
 
-func TestBuildConfigOutput_InvalidJSON(t *testing.T) {
-	fn := &inngest.Function{
-		Slug:   testSlug,
-		Name:   "Test",
-		Config: `not-json`,
-	}
-
-	result := buildConfigOutput(fn)
-
-	// With invalid JSON, rawConfig should be the raw string.
-	if result["rawConfig"] != "not-json" {
-		t.Errorf("expected rawConfig to be raw string when JSON is invalid, got %v", result["rawConfig"])
-	}
-}
-
 func TestFunctionsGet_TextOutput(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": getFunctionResponse,
+		"ListFunctions": getFunctionResponse,
 	}, nil)
 	defer srv.Close()
 
@@ -524,7 +501,7 @@ func TestFunctionsList_Error(t *testing.T) {
 
 func TestFunctionsGet_Error(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": `{"data":null,"errors":[{"message":"not found"}]}`,
+		"ListFunctions": `{"data":null,"errors":[{"message":"not found"}]}`,
 	}, nil)
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
@@ -563,7 +540,7 @@ func TestPrintConfiguration_RetriesDefault(t *testing.T) {
 
 func TestFunctionsConfig_Error(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": `{"data":null,"errors":[{"message":"not found"}]}`,
+		"ListFunctions": `{"data":null,"errors":[{"message":"not found"}]}`,
 	}, nil)
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
@@ -583,10 +560,11 @@ func TestFunctionsConfig_Error(t *testing.T) {
 	}
 }
 
-func TestFunctionsConfig_TextInvalidRawConfig(t *testing.T) {
-	// Return a function with invalid JSON in the Config field so the else branch is hit.
+func TestFunctionsConfig_TextNoConfig(t *testing.T) {
+	// Return a function without configuration to test the "No configuration" branch.
+	resp := `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Test","slug":"test-fn","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"test/event"}],"app":{"id":"app-1","name":"test-app","externalID":"test-app"}}]}],"page":{"page":1,"totalPages":1}}}}`
 	srv := newMockServer(t, map[string]string{
-		"GetFunction": `{"data":{"functionBySlug":{"id":"fn-1","name":"Test","slug":"test-fn","config":"not-valid-json","configuration":{"retries":{"value":3,"isDefault":false}}}}}`,
+		"ListFunctions": resp,
 	}, nil)
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
@@ -604,10 +582,7 @@ func TestFunctionsConfig_TextInvalidRawConfig(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "not-valid-json") {
-		t.Errorf("expected output to contain raw config string 'not-valid-json', got: %s", got)
-	}
-	if !strings.Contains(got, "Raw Config") {
-		t.Errorf("expected output to contain 'Raw Config', got: %s", got)
+	if !strings.Contains(got, "No configuration") {
+		t.Errorf("expected output to contain 'No configuration', got: %s", got)
 	}
 }

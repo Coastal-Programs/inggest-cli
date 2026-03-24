@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
+	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 )
 
 // newMockServer creates a test server that handles GraphQL and REST endpoints.
@@ -60,4 +63,20 @@ func newMockServer(t *testing.T, gqlResponses map[string]string, restHandlers ma
 		t.Logf("unhandled request: %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 	}))
+}
+
+// setupCloudState configures state globals for cloud tests pointing at the given server URL.
+func setupCloudState(t *testing.T, srvURL string) {
+	t.Helper()
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = testOutputJSON
+	state.APIBaseURL = srvURL
+	state.DevServer = srvURL
+	state.DevMode = false
+	state.Env = ""
+	state.AppVersion = testAppVersion
 }

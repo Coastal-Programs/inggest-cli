@@ -2,15 +2,14 @@ package inngest
 
 import "time"
 
-// Function represents an Inngest function.
+// Function represents an Inngest function (called "Workflow" in the API).
 type Function struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
 	Slug          string                 `json:"slug"`
-	AppID         string                 `json:"appID"`
-	URL           string                 `json:"url"`
-	Config        string                 `json:"config"`
-	Concurrency   int                    `json:"concurrency"`
+	URL           string                 `json:"url,omitempty"`
+	IsPaused      bool                   `json:"isPaused"`
+	IsArchived    bool                   `json:"isArchived"`
 	Triggers      []FunctionTrigger      `json:"triggers"`
 	Configuration *FunctionConfiguration `json:"configuration,omitempty"`
 	App           *App                   `json:"app,omitempty"`
@@ -80,22 +79,36 @@ type EventsBatchConfig struct {
 	Key     string `json:"key,omitempty"`
 }
 
-// App represents an Inngest app.
+// App represents an Inngest app (nested within workflows/functions).
 type App struct {
-	ID             string     `json:"id"`
-	ExternalID     string     `json:"externalID"`
-	Name           string     `json:"name"`
-	SDKLanguage    string     `json:"sdkLanguage"`
-	SDKVersion     string     `json:"sdkVersion"`
-	Framework      string     `json:"framework,omitempty"`
-	URL            string     `json:"url,omitempty"`
-	Checksum       string     `json:"checksum,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Connected      bool       `json:"connected"`
-	FunctionCount  int        `json:"functionCount"`
-	Autodiscovered bool       `json:"autodiscovered,omitempty"`
-	Method         string     `json:"method,omitempty"`
-	Functions      []Function `json:"functions,omitempty"`
+	ID          string `json:"id"`
+	ExternalID  string `json:"externalID"`
+	Name        string `json:"name"`
+	AppVersion  string `json:"appVersion,omitempty"`
+	SDKLanguage string `json:"sdkLanguage,omitempty"`
+	SDKVersion  string `json:"sdkVersion,omitempty"`
+}
+
+// Environment represents an Inngest environment (workspace) from the envs query.
+type Environment struct {
+	ID                   string     `json:"id"`
+	Name                 string     `json:"name"`
+	Slug                 string     `json:"slug"`
+	Type                 string     `json:"type"`
+	IsAutoArchiveEnabled bool       `json:"isAutoArchiveEnabled,omitempty"`
+	WebhookSigningKey    string     `json:"webhookSigningKey,omitempty"`
+	CreatedAt            *time.Time `json:"createdAt,omitempty"`
+}
+
+// EnvEdge wraps an Environment with relay-style pagination.
+type EnvEdge struct {
+	Node Environment `json:"node"`
+}
+
+// EnvsConnection is a relay-style paginated list of environments.
+type EnvsConnection struct {
+	Edges    []EnvEdge `json:"edges"`
+	PageInfo PageInfo  `json:"pageInfo"`
 }
 
 // Event represents an Inngest event.
@@ -173,15 +186,43 @@ type RunEdge struct {
 	Cursor string      `json:"cursor"`
 }
 
-// EventsConnection is a paginated list of events.
-type EventsConnection struct {
-	Edges      []EventEdge `json:"edges"`
-	PageInfo   PageInfo    `json:"pageInfo"`
-	TotalCount int         `json:"totalCount"`
+// EventType represents an event type from the Inngest Cloud API.
+// The API returns event types (not instances) via the `events` query.
+type EventType struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	FirstSeen   *time.Time      `json:"firstSeen,omitempty"`
+	Usage       *EventTypeUsage `json:"usage,omitempty"`
+	Workflows   []Function      `json:"workflows,omitempty"`
+	Recent      []ArchivedEvent `json:"recent,omitempty"`
 }
 
-// EventEdge wraps an Event with a cursor.
-type EventEdge struct {
-	Node   Event  `json:"node"`
-	Cursor string `json:"cursor"`
+// EventTypeUsage holds usage statistics for an event type.
+type EventTypeUsage struct {
+	Total int `json:"total"`
+}
+
+// ArchivedEvent represents an individual event instance from `recent`.
+type ArchivedEvent struct {
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	OccurredAt   *time.Time    `json:"occurredAt,omitempty"`
+	ReceivedAt   *time.Time    `json:"receivedAt,omitempty"`
+	Event        string        `json:"event,omitempty"` // JSON string of the event payload
+	Version      string        `json:"version,omitempty"`
+	FunctionRuns []FunctionRun `json:"functionRuns,omitempty"`
+}
+
+// EventTypesResult is the paginated result from the `events` query.
+type EventTypesResult struct {
+	Data []EventType `json:"data"`
+	Page PageResults `json:"page"`
+}
+
+// PageResults holds page-based pagination info.
+type PageResults struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"perPage"`
+	TotalItems int `json:"totalItems"`
+	TotalPages int `json:"totalPages"`
 }
