@@ -1,6 +1,7 @@
 package inngest
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -95,7 +96,7 @@ func TestNewClient(t *testing.T) {
 func TestGraphqlURL(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		c := NewClient(ClientOptions{})
-		want := defaultAPIBaseURL + "/v0/gql"
+		want := defaultAPIBaseURL + "/gql"
 		if got := c.graphqlURL(); got != want {
 			t.Errorf("graphqlURL() = %q, want %q", got, want)
 		}
@@ -103,7 +104,7 @@ func TestGraphqlURL(t *testing.T) {
 
 	t.Run("custom base URL", func(t *testing.T) {
 		c := NewClient(ClientOptions{APIBaseURL: "https://custom.api.io"})
-		want := "https://custom.api.io/v0/gql"
+		want := "https://custom.api.io/gql"
 		if got := c.graphqlURL(); got != want {
 			t.Errorf("graphqlURL() = %q, want %q", got, want)
 		}
@@ -1041,4 +1042,91 @@ func TestRestURL_DevModeCustomURL(t *testing.T) {
 	if got := c.restURL("functions"); got != want {
 		t.Errorf("restURL(\"functions\") = %q, want %q", got, want)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TestHashSigningKey
+// ---------------------------------------------------------------------------
+
+func TestHashSigningKey(t *testing.T) {
+	// Test vector derived from inngest/inngest pkg/authn/signing_key_strategy.go:
+	// normalizeKey strips "signkey-test-" prefix, then hex-decode + SHA-256 + hex-encode.
+	t.Run("cloud key with prefix", func(t *testing.T) {
+		// "abc123def456" hex-decoded = 6 bytes, SHA-256 of those bytes
+		key := "signkey-test-abc123def456"
+		got, err := HashSigningKey(key)
+		if err != nil {
+			t.Fatalf("HashSigningKey(%q) error: %v", key, err)
+		}
+		if got == "" {
+			t.Fatal("expected non-empty hash")
+		}
+		if got == "abc123def456" {
+			t.Error("hash should not equal the raw key material")
+		}
+		if len(got) != 64 {
+			t.Errorf("expected 64-char hex SHA-256 hash, got %d chars: %s", len(got), got)
+		}
+	})
+
+	t.Run("prod key prefix stripped", func(t *testing.T) {
+		key := "signkey-prod-abc123def456"
+		got, err := HashSigningKey(key)
+		if err != nil {
+			t.Fatalf("HashSigningKey(%q) error: %v", key, err)
+		}
+		// Should produce same hash as test prefix since the hex payload is the same
+		key2 := "signkey-test-abc123def456"
+		got2, _ := HashSigningKey(key2)
+		if got != got2 {
+			t.Errorf("same hex payload with different prefixes should hash the same: %q != %q", got, got2)
+		}
+	})
+
+	t.Run("raw hex key without prefix", func(t *testing.T) {
+		key := "abc123def456"
+		got, err := HashSigningKey(key)
+		if err != nil {
+			t.Fatalf("HashSigningKey(%q) error: %v", key, err)
+		}
+		if len(got) != 64 {
+			t.Errorf("expected 64-char hash, got %d", len(got))
+		}
+	})
+
+	t.Run("invalid hex returns error", func(t *testing.T) {
+		_, err := HashSigningKey("not-hex-at-all")
+		if err == nil {
+			t.Fatal("expected error for non-hex key")
+		}
+	})
+
+	t.Run("odd-length hex returns error", func(t *testing.T) {
+		_, err := HashSigningKey("abc")
+		if err == nil {
+			t.Fatal("expected error for odd-length hex")
+		}
+	})
+
+	t.Run("matches inngest server implementation", func(t *testing.T) {
+		// Verify against the Go server's HashedSigningKey from
+		// inngest/inngest pkg/authn/signing_key_strategy.go:
+		// HashedSigningKey("abc123def456") should produce the same result.
+		key := "signkey-test-abc123def456"
+		got, err := HashSigningKey(key)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Manually compute: hex.Decode("abc123def456") -> sha256 -> hex.Encode
+		raw := []byte{0xab, 0xc1, 0x23, 0xde, 0xf4, 0x56}
+		sum := sha256Sum(raw)
+		want := fmt.Sprintf("%x", sum)
+		if got != want {
+			t.Errorf("HashSigningKey(%q) = %q, want %q", key, got, want)
+		}
+	})
+}
+
+func sha256Sum(data []byte) [32]byte {
+	return sha256.Sum256(data)
 }

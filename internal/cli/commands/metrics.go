@@ -69,8 +69,9 @@ func NewHealthCmd() *cobra.Command {
 				})
 			}
 
-			// 3. API reachability (query functions list)
-			_, err := client.ListFunctions(ctx)
+			// 3. API reachability (simple connectivity check)
+			var probe interface{}
+			err := client.ExecuteGraphQL(ctx, "HealthCheck", `query HealthCheck { __typename }`, nil, &probe)
 			if err != nil {
 				results = append(results, checkResult{
 					Check:  "api",
@@ -129,12 +130,10 @@ func NewHealthCmd() *cobra.Command {
 					fmt.Println("\nAll checks passed.")
 				}
 			} else {
-				if err := output.Print(map[string]interface{}{
+				_ = output.Print(map[string]interface{}{
 					"checks":  results,
 					"healthy": allPassed,
-				}, format); err != nil {
-					return err
-				}
+				}, format)
 			}
 
 			if !allPassed {
@@ -236,10 +235,7 @@ func NewMetricsCmd() *cobra.Command {
 				if len(durations) == 0 {
 					return 0
 				}
-				idx := int(float64(len(durations)) * p)
-				if idx >= len(durations) {
-					idx = len(durations) - 1
-				}
+				idx := int(float64(len(durations)-1) * p)
 				return durations[idx]
 			}
 

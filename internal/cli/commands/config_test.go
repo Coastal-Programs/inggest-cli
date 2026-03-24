@@ -494,4 +494,73 @@ func TestConfigSource_AllKeys(t *testing.T) {
 	if got := configSource(cfg3, "event_key"); got != "env (INNGEST_EVENT_KEY)" {
 		t.Errorf("expected source 'env (INNGEST_EVENT_KEY)' for event_key from env, got %q", got)
 	}
+
+	// event_key default (neither config nor env set)
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	cfg4 := &config.Config{}
+	if got := configSource(cfg4, "event_key"); got != "default" {
+		t.Errorf("expected source 'default' for empty event_key, got %q", got)
+	}
+}
+
+func TestConfigCmd_BareHelp(t *testing.T) {
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error from bare config command: %v", err)
+	}
+}
+
+func TestConfigGet_SecretKeyRedacted(t *testing.T) {
+	state.Config = &config.Config{
+		SigningKey: "signkey-test-redactme123",
+	}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"get", "signing_key"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	var out string
+	var execErr error
+	out = captureStdout(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("unexpected error: %v", execErr)
+	}
+
+	// Should contain redacted value, not the raw one
+	if strings.Contains(out, "signkey-test-redactme123") {
+		t.Error("output contains unredacted signing key")
+	}
+	if !strings.Contains(out, "sign****e123") {
+		t.Errorf("expected redacted value in output, got: %s", out)
+	}
+}
+
+func TestConfigSet_SaveError(t *testing.T) {
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", "/dev/null/impossible/cli.json")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewConfigCmd()
+	cmd.SetArgs([]string{"set", "active_env", "staging"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when config save fails")
+	}
+	if !strings.Contains(err.Error(), "saving config") {
+		t.Errorf("expected error about saving config, got: %v", err)
+	}
 }

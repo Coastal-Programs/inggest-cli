@@ -224,7 +224,7 @@ func newAuthStatusCmd() *cobra.Command {
 				err := client.ExecuteGraphQL(
 					context.Background(),
 					"AuthCheck",
-					`query AuthCheck { functions { id name } }`,
+					`query AuthCheck { __typename }`,
 					nil,
 					&data,
 				)
@@ -241,20 +241,39 @@ func newAuthStatusCmd() *cobra.Command {
 	}
 }
 
-// isInteractive returns true if stdin is a terminal.
-func isInteractive() bool {
+// isInteractiveFn is the function used to check if stdin is a terminal.
+// Overridden in tests to simulate interactive/non-interactive modes.
+var isInteractiveFn = func() bool {
 	return term.IsTerminal(int(syscall.Stdin))
 }
 
-// readSecret prompts for a secret without echoing to terminal.
-func readSecret(prompt string) (string, error) {
+// isInteractive returns true if stdin is a terminal.
+func isInteractive() bool {
+	return isInteractiveFn()
+}
+
+// termReadPasswordFn wraps term.ReadPassword for test injection.
+var termReadPasswordFn = func(fd int) ([]byte, error) {
+	return term.ReadPassword(fd)
+}
+
+// readSecretFn is the function used to read a secret from the terminal.
+// Overridden in tests to avoid requiring a real terminal.
+var readSecretFn = defaultReadSecret
+
+func defaultReadSecret(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
-	bytes, err := term.ReadPassword(int(syscall.Stdin))
+	bytes, err := termReadPasswordFn(int(syscall.Stdin))
 	fmt.Fprintln(os.Stderr) // newline after hidden input
 	if err != nil {
 		return "", fmt.Errorf("failed to read input: %w", err)
 	}
 	return strings.TrimSpace(string(bytes)), nil
+}
+
+// readSecret prompts for a secret without echoing to terminal.
+func readSecret(prompt string) (string, error) {
+	return readSecretFn(prompt)
 }
 
 // validateSigningKey checks if the key is a valid Inngest signing key.

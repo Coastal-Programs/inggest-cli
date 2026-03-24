@@ -707,3 +707,156 @@ func TestRunsGet_Text(t *testing.T) {
 		t.Errorf("expected text output to contain COMPLETED, got: %s", got)
 	}
 }
+
+// ---------- error-path tests ----------
+
+func TestRunsList_ListRunsError(t *testing.T) {
+	// No "ListRuns" key → mock returns 400 → client returns error.
+	srv := newMockServer(t, map[string]string{}, nil)
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"list"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListRuns fails")
+	}
+	if !strings.Contains(err.Error(), "listing runs") {
+		t.Errorf("expected error about listing runs, got: %v", err)
+	}
+}
+
+func TestRunsGet_Error(t *testing.T) {
+	// No "GetRun" key → mock returns 400 → client returns error.
+	srv := newMockServer(t, map[string]string{}, nil)
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"get", "run-nonexistent"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when GetRun fails")
+	}
+	if !strings.Contains(err.Error(), "getting run") {
+		t.Errorf("expected error about getting run, got: %v", err)
+	}
+}
+
+func TestRunsCancel_Error(t *testing.T) {
+	// No "CancelRun" key → mock returns 400 → client returns error.
+	srv := newMockServer(t, map[string]string{}, nil)
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"cancel", "run-nonexistent", "--force"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when CancelRun fails")
+	}
+	if !strings.Contains(err.Error(), "cancelling run") {
+		t.Errorf("expected error about cancelling run, got: %v", err)
+	}
+}
+
+func TestRunsReplay_Error(t *testing.T) {
+	// No "Rerun" key → mock returns 400 → client returns error.
+	srv := newMockServer(t, map[string]string{}, nil)
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"replay", "run-nonexistent"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when RerunRun fails")
+	}
+	if !strings.Contains(err.Error(), "replaying run") {
+		t.Errorf("expected error about replaying run, got: %v", err)
+	}
+}
+
+func TestRunsWatch_CtxDonePath(t *testing.T) {
+	// Use a very long interval so the ticker never fires before SIGINT.
+	// This ensures the select picks ctx.Done() instead of ticker.C.
+	srv := newMockServer(t, map[string]string{
+		"ListRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false},"totalCount":0}}}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"watch", "--interval", "1h"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	// Give the goroutine time to start and enter the select, then SIGINT.
+	time.Sleep(50 * time.Millisecond)
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch command didn't stop after SIGINT")
+	}
+}
+
+func TestRunsWatch_QueuedAtFallback(t *testing.T) {
+	// Return runs with queuedAt set but startedAt absent (null) to cover the else-if branch.
+	srv := newMockServer(t, map[string]string{
+		"ListRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-q1","status":"QUEUED","queuedAt":"2024-01-01T12:00:00Z","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}},"cursor":"c1"}],"pageInfo":{"hasNextPage":false,"endCursor":"c1"},"totalCount":1}}}`,
+	}, nil)
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	cmd := NewRunsCmd()
+	cmd.SetArgs([]string{"watch", "--interval", "10ms"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Execute()
+	}()
+
+	// Give the watch command time to do at least one poll, then send SIGINT.
+	time.Sleep(50 * time.Millisecond)
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch command didn't stop after SIGINT")
+	}
+}

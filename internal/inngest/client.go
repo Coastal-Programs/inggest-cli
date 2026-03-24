@@ -2,14 +2,19 @@ package inngest
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var signingKeyPrefixRegexp = regexp.MustCompile(`^signkey-\w+-`)
 
 const (
 	defaultAPIBaseURL   = "https://api.inngest.com"
@@ -106,7 +111,13 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 
 	req.Header.Set("User-Agent", c.userAgent)
 	if c.signingKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.signingKey)
+		hashed, err := HashSigningKey(c.signingKey)
+		if err != nil {
+			// Fall back to raw key if hashing fails (e.g. non-hex self-hosted key).
+			req.Header.Set("Authorization", "Bearer "+c.signingKey)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+hashed)
+		}
 	}
 	if c.env != "" && !c.devMode {
 		req.Header.Set("X-Inngest-Env", c.env)
@@ -120,7 +131,12 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	// If auth failed and we have a fallback key, retry with it.
 	if resp.StatusCode == http.StatusUnauthorized && c.signingKeyFallback != "" {
 		resp.Body.Close()
-		req.Header.Set("Authorization", "Bearer "+c.signingKeyFallback)
+		hashed, err := HashSigningKey(c.signingKeyFallback)
+		if err != nil {
+			req.Header.Set("Authorization", "Bearer "+c.signingKeyFallback)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+hashed)
+		}
 		return c.doWithRetry(req, bodyBytes)
 	}
 
@@ -174,7 +190,7 @@ func (c *Client) graphqlURL() string {
 	if c.devMode {
 		return c.devServerURL + "/v0/gql"
 	}
-	return c.apiBaseURL + "/v0/gql"
+	return c.apiBaseURL + "/gql"
 }
 
 // restURL returns the REST v1 API URL for the given path.
@@ -197,4 +213,23 @@ func (c *Client) eventURL() string {
 // devURL returns a dev server URL for the given path.
 func (c *Client) devURL(path string) string {
 	return c.devServerURL + "/" + strings.TrimLeft(path, "/")
+}
+
+// HashSigningKey hashes a signing key to match the Inngest SDK convention.
+// The raw key is never sent over the wire — instead:
+//  1. Strip the "signkey-{env}-" prefix
+//  2. Hex-decode the remaining string
+//  3. SHA-256 hash those bytes
+//  4. Hex-encode the hash
+//
+// This matches inngest/inngest pkg/authn/signing_key_strategy.go HashedSigningKey
+// and inngest/inngest-js helpers/strings.ts hashSigningKey.
+func HashSigningKey(key string) (string, error) {
+	normalized := signingKeyPrefixRegexp.ReplaceAllString(key, "")
+	raw, err := hex.DecodeString(normalized)
+	if err != nil {
+		return "", fmt.Errorf("signing key is not valid hex: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }

@@ -583,6 +583,46 @@ func TestInvokeDevFunction_InvalidJSON_Response(t *testing.T) {
 	}
 }
 
+func TestGetDevInfo_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{DevServerURL: "http://invalid\x00host"})
+	_, err := client.GetDevInfo(context.Background())
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "create dev info request") {
+		t.Errorf("expected 'create dev info request' error, got: %v", err)
+	}
+}
+
+func TestIsDevServerRunning_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{DevServerURL: "http://invalid\x00host"})
+	if client.IsDevServerRunning(context.Background()) {
+		t.Fatal("expected false for invalid URL")
+	}
+}
+
+func TestSendDevEvent_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{DevServerURL: "http://invalid\x00host", EventKey: "k"})
+	_, err := client.SendDevEvent(context.Background(), map[string]string{"name": "test"})
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "create send event request") {
+		t.Errorf("expected 'create send event request' error, got: %v", err)
+	}
+}
+
+func TestInvokeDevFunction_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{DevServerURL: "http://invalid\x00host"})
+	_, err := client.InvokeDevFunction(context.Background(), "fn", nil)
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "create invoke request") {
+		t.Errorf("expected 'create invoke request' error, got: %v", err)
+	}
+}
+
 func TestSendDevEvent_MarshalError(t *testing.T) {
 	client := NewClient(ClientOptions{
 		DevServerURL: "http://localhost:0",

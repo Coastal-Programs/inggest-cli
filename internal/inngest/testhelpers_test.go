@@ -41,14 +41,14 @@ type graphqlBody struct {
 	Variables     map[string]interface{} `json:"variables,omitempty"`
 }
 
-// newTestServer creates an httptest.Server that handles POST /v0/gql and
+// newTestServer creates an httptest.Server that handles POST /gql (cloud) and
 // returns the given JSON response body. It verifies method, path, content-type
 // and authorization headers. If captured is non-nil the decoded request body is
 // stored there for assertions.
 func newTestServer(t *testing.T, responseBody string, captured *graphqlRequest) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/gql" {
+		if r.URL.Path != "/gql" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.NotFound(w, r)
 			return

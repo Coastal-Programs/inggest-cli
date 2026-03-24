@@ -903,3 +903,18 @@ func TestSendEvent_ReadBodyError(t *testing.T) {
 		t.Errorf("expected error to contain 'read send event response', got: %v", err)
 	}
 }
+
+func TestSendEvent_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{
+		EventKey:     "k",
+		DevMode:      true,
+		DevServerURL: "http://invalid\x00host",
+	})
+	_, err := client.SendEvent(context.Background(), map[string]string{"name": "test"})
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "create send event request") {
+		t.Errorf("expected 'create send event request' error, got: %v", err)
+	}
+}

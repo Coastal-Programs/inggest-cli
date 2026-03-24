@@ -490,3 +490,119 @@ func TestFunctionsGet_TextOutput(t *testing.T) {
 		t.Errorf("expected text output to contain %q, got: %s", "Name:", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tests for uncovered error and branch paths
+// ---------------------------------------------------------------------------
+
+func TestFunctionsList_Error(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListFunctions": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, nil)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"list"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListFunctions fails")
+	}
+	if !strings.Contains(err.Error(), "listing functions") {
+		t.Errorf("expected error about listing functions, got: %v", err)
+	}
+}
+
+func TestFunctionsGet_Error(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"GetFunction": `{"data":null,"errors":[{"message":"not found"}]}`,
+	}, nil)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"get", "nonexistent-func"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when GetFunction fails")
+	}
+	if !strings.Contains(err.Error(), "getting function") {
+		t.Errorf("expected error about getting function, got: %v", err)
+	}
+}
+
+func TestPrintConfiguration_RetriesDefault(t *testing.T) {
+	cfg := &inngest.FunctionConfiguration{
+		Retries: &inngest.RetryConfig{Value: 4, IsDefault: true},
+	}
+
+	got := captureStdout(t, func() {
+		printConfiguration(cfg)
+	})
+
+	if !strings.Contains(got, "(default)") {
+		t.Errorf("expected output to contain '(default)', got: %s", got)
+	}
+	if !strings.Contains(got, "Retries") {
+		t.Errorf("expected output to contain 'Retries', got: %s", got)
+	}
+}
+
+func TestFunctionsConfig_Error(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"GetFunction": `{"data":null,"errors":[{"message":"not found"}]}`,
+	}, nil)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"config", "nonexistent-func"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when GetFunction fails for config")
+	}
+	if !strings.Contains(err.Error(), "getting function config") {
+		t.Errorf("expected error about getting function config, got: %v", err)
+	}
+}
+
+func TestFunctionsConfig_TextInvalidRawConfig(t *testing.T) {
+	// Return a function with invalid JSON in the Config field so the else branch is hit.
+	srv := newMockServer(t, map[string]string{
+		"GetFunction": `{"data":{"functionBySlug":{"id":"fn-1","name":"Test","slug":"test-fn","config":"not-valid-json","configuration":{"retries":{"value":3,"isDefault":false}}}}}`,
+	}, nil)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+	state.Output = "text"
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"config", "test-fn"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "not-valid-json") {
+		t.Errorf("expected output to contain raw config string 'not-valid-json', got: %s", got)
+	}
+	if !strings.Contains(got, "Raw Config") {
+		t.Errorf("expected output to contain 'Raw Config', got: %s", got)
+	}
+}

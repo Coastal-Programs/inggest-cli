@@ -28,6 +28,12 @@ type Config struct {
 var (
 	configPath string
 	once       sync.Once
+
+	// Injected for testing. Default to stdlib functions.
+	userConfigDirFn     = os.UserConfigDir
+	jsonMarshalIndentFn = func(v any, prefix, indent string) ([]byte, error) {
+		return json.MarshalIndent(v, prefix, indent)
+	}
 )
 
 // ResetForTest resets the cached config path so tests can set INNGEST_CLI_CONFIG.
@@ -47,7 +53,7 @@ func DefaultConfigPath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "inngest", "cli.json")
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
+	if dir, err := userConfigDirFn(); err == nil {
 		return filepath.Join(dir, "inngest", "cli.json")
 	}
 	home, _ := os.UserHomeDir()
@@ -93,7 +99,7 @@ func (c *Config) Save() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := jsonMarshalIndentFn(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)
 	}

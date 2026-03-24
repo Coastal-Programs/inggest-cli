@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -649,5 +650,323 @@ func TestAuthLoginInvalidFallbackKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid signing key fallback") {
 		t.Errorf("expected error about invalid signing key fallback, got: %v", err)
+	}
+}
+
+func TestAuthCmd_BareHelp(t *testing.T) {
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error from bare auth command: %v", err)
+	}
+}
+
+func TestAuthLogin_SaveError(t *testing.T) {
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", "/dev/null/impossible/cli.json")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-abc123"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when config save fails")
+	}
+	if !strings.Contains(err.Error(), "saving config") {
+		t.Errorf("expected error about saving config, got: %v", err)
+	}
+}
+
+func TestAuthLogout_SaveError(t *testing.T) {
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", "/dev/null/impossible/cli.json")
+
+	state.Config = &config.Config{
+		SigningKey: "signkey-test-abc123",
+		EventKey:   "evt-key-xyz",
+	}
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"logout"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when config save fails")
+	}
+	if !strings.Contains(err.Error(), "saving config") {
+		t.Errorf("expected error about saving config, got: %v", err)
+	}
+}
+
+func TestAuthStatus_FallbackFromEnv(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	config.ResetForTest()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-envfallback")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-primary"}
+	state.APIBaseURL = ""
+	state.DevServer = ""
+	state.Env = ""
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if v, ok := result["signing_key_fallback_source"].(string); !ok || v != "env (INNGEST_SIGNING_KEY_FALLBACK)" {
+		t.Errorf("expected signing_key_fallback_source=%q, got %v", "env (INNGEST_SIGNING_KEY_FALLBACK)", result["signing_key_fallback_source"])
+	}
+}
+
+func TestAuthStatus_FallbackFromBoth(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	config.ResetForTest()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-envfallback")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{
+		SigningKey:         "signkey-test-primary",
+		SigningKeyFallback: "signkey-test-cfgfallback",
+	}
+	state.APIBaseURL = ""
+	state.DevServer = ""
+	state.Env = ""
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if v, ok := result["signing_key_fallback_source"].(string); !ok || v != "config (env var also set)" {
+		t.Errorf("expected signing_key_fallback_source=%q, got %v", "config (env var also set)", result["signing_key_fallback_source"])
+	}
+}
+
+func TestAuthStatus_EventKeyFromBoth(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	config.ResetForTest()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
+	t.Setenv("INNGEST_EVENT_KEY", "evt-from-env")
+
+	state.Config = &config.Config{EventKey: "evt-from-config"}
+	state.APIBaseURL = ""
+	state.DevServer = ""
+	state.Env = ""
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if v, ok := result["event_key_source"].(string); !ok || v != "config (env var also set)" {
+		t.Errorf("expected event_key_source=%q, got %v", "config (env var also set)", result["event_key_source"])
+	}
+}
+
+func TestAuthStatus_EventKeyFromConfig(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	config.ResetForTest()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{EventKey: "evt-from-config-only"}
+	state.APIBaseURL = ""
+	state.DevServer = ""
+	state.Env = ""
+	state.Output = "json"
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
+	}
+
+	if v, ok := result["event_key_source"].(string); !ok || v != "config" {
+		t.Errorf("expected event_key_source=%q, got %v", "config", result["event_key_source"])
+	}
+}
+
+func TestAuthLogin_InteractivePrompt(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	// Mock isInteractive to return true
+	oldInteractive := isInteractiveFn
+	isInteractiveFn = func() bool { return true }
+	t.Cleanup(func() { isInteractiveFn = oldInteractive })
+
+	// Mock readSecret to return a valid signing key
+	oldSecret := readSecretFn
+	callCount := 0
+	readSecretFn = func(prompt string) (string, error) {
+		callCount++
+		if callCount == 1 {
+			return "signkey-test-interactive", nil
+		}
+		return "evt-interactive-key", nil // event key
+	}
+	t.Cleanup(func() { readSecretFn = oldSecret })
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if state.Config.SigningKey != "signkey-test-interactive" {
+		t.Errorf("expected signing key %q, got %q", "signkey-test-interactive", state.Config.SigningKey)
+	}
+	if state.Config.EventKey != "evt-interactive-key" {
+		t.Errorf("expected event key %q, got %q", "evt-interactive-key", state.Config.EventKey)
+	}
+}
+
+func TestAuthLogin_InteractiveReadSecretError(t *testing.T) {
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	oldInteractive := isInteractiveFn
+	isInteractiveFn = func() bool { return true }
+	t.Cleanup(func() { isInteractiveFn = oldInteractive })
+
+	oldSecret := readSecretFn
+	readSecretFn = func(prompt string) (string, error) {
+		return "", fmt.Errorf("terminal error")
+	}
+	t.Cleanup(func() { readSecretFn = oldSecret })
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when readSecret fails")
+	}
+}
+
+func TestReadSecret_DefaultNonTerminal(t *testing.T) {
+	// Don't override readSecretFn — use the default which calls term.ReadPassword.
+	// In tests, stdin is not a terminal, so it should fail.
+	_, err := readSecret("test prompt: ")
+	if err == nil {
+		t.Fatal("expected error when stdin is not a terminal")
+	}
+	if !strings.Contains(err.Error(), "failed to read input") {
+		t.Errorf("expected 'failed to read input' error, got: %v", err)
+	}
+}
+
+func TestDefaultReadSecret_Success(t *testing.T) {
+	// Mock termReadPasswordFn to simulate a successful terminal read.
+	old := termReadPasswordFn
+	termReadPasswordFn = func(fd int) ([]byte, error) {
+		return []byte("  my-secret  "), nil
+	}
+	t.Cleanup(func() { termReadPasswordFn = old })
+
+	got, err := defaultReadSecret("prompt: ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "my-secret" {
+		t.Errorf("got %q, want %q", got, "my-secret")
 	}
 }

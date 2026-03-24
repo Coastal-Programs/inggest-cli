@@ -358,3 +358,111 @@ func TestEnvGet_ByID(t *testing.T) {
 		t.Errorf("expected output to contain %q, got: %s", "my-app", out)
 	}
 }
+
+func TestEnvCmd_BareHelp(t *testing.T) {
+	cmd := NewEnvCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error from bare env command: %v", err)
+	}
+}
+
+func TestEnvList_Error(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListApps": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, map[string]http.HandlerFunc{})
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	cmd := NewEnvCmd()
+	cmd.SetArgs([]string{"list"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListApps fails")
+	}
+	if !strings.Contains(err.Error(), "listing environments") {
+		t.Errorf("expected error about listing environments, got: %v", err)
+	}
+}
+
+func TestEnvUse_SaveError(t *testing.T) {
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", "/dev/null/impossible/cli.json")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{}
+	state.Output = "json"
+
+	cmd := NewEnvCmd()
+	cmd.SetArgs([]string{"use", "staging"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when config save fails")
+	}
+	if !strings.Contains(err.Error(), "saving config") {
+		t.Errorf("expected error about saving config, got: %v", err)
+	}
+}
+
+func TestEnvGet_ListAppsError(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListApps": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, map[string]http.HandlerFunc{})
+	defer srv.Close()
+
+	setupCloudState(t, srv.URL)
+
+	cmd := NewEnvCmd()
+	cmd.SetArgs([]string{"get", "my-app"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListApps fails")
+	}
+	if !strings.Contains(err.Error(), "listing environments") {
+		t.Errorf("expected error about listing environments, got: %v", err)
+	}
+}
+
+func TestPrintEnvDetail_WithError(t *testing.T) {
+	app := &inngest.App{
+		ID:            "app-123",
+		ExternalID:    "ext-456",
+		Name:          "my-app",
+		SDKLanguage:   "go",
+		SDKVersion:    "0.1.0",
+		Connected:     false,
+		FunctionCount: 0,
+		Error:         "connection refused",
+	}
+
+	got := captureStdout(t, func() {
+		if err := printEnvDetail(app); err != nil {
+			t.Fatalf("printEnvDetail returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "Error:") {
+		t.Errorf("expected output to contain 'Error:', got: %s", got)
+	}
+	if !strings.Contains(got, "connection refused") {
+		t.Errorf("expected output to contain 'connection refused', got: %s", got)
+	}
+}

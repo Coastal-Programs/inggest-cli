@@ -16,7 +16,7 @@ func newMockServer(t *testing.T, gqlResponses map[string]string, restHandlers ma
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// GraphQL endpoint
-		if r.URL.Path == "/v0/gql" && r.Method == http.MethodPost {
+		if (r.URL.Path == "/gql" || r.URL.Path == "/v0/gql") && r.Method == http.MethodPost {
 			body, _ := io.ReadAll(r.Body)
 			var req struct {
 				OperationName string `json:"operationName"`

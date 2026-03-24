@@ -193,8 +193,8 @@ func TestExecuteGraphQL_RequestBody(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST method, got %s", r.Method)
 		}
-		if r.URL.Path != "/v0/gql" {
-			t.Errorf("expected path /v0/gql, got %s", r.URL.Path)
+		if r.URL.Path != "/gql" {
+			t.Errorf("expected path /gql, got %s", r.URL.Path)
 		}
 
 		var reqBody graphqlRequest
@@ -346,5 +346,28 @@ func TestExecuteGraphQL_ReadBodyError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read graphql response") {
 		t.Errorf("expected error to contain 'read graphql response', got: %v", err)
+	}
+}
+
+func TestExecuteGraphQL_MarshalError(t *testing.T) {
+	client := NewClient(ClientOptions{})
+	vars := map[string]interface{}{"bad": make(chan int)}
+	err := client.ExecuteGraphQL(context.Background(), "Test", "query {}", vars, nil)
+	if err == nil {
+		t.Fatal("expected marshal error")
+	}
+	if !strings.Contains(err.Error(), "marshal graphql request") {
+		t.Errorf("expected 'marshal graphql request' error, got: %v", err)
+	}
+}
+
+func TestExecuteGraphQL_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{APIBaseURL: "http://invalid\x00host"})
+	err := client.ExecuteGraphQL(context.Background(), "Test", "query {}", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "create graphql request") {
+		t.Errorf("expected 'create graphql request' error, got: %v", err)
 	}
 }

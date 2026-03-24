@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,5 +484,46 @@ func TestSave_MkdirAllError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "creating config dir") {
 		t.Errorf("error should mention 'creating config dir', got: %v", err)
+	}
+}
+
+// --- DefaultConfigPath: UserConfigDir fails ---
+
+func TestDefaultConfigPath_UserConfigDirFails(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	old := userConfigDirFn
+	userConfigDirFn = func() (string, error) {
+		return "", fmt.Errorf("no config dir")
+	}
+	t.Cleanup(func() { userConfigDirFn = old })
+
+	got := DefaultConfigPath()
+	if !strings.HasSuffix(got, filepath.Join(".config", "inngest", "cli.json")) {
+		t.Errorf("expected fallback path ending .config/inngest/cli.json, got %q", got)
+	}
+}
+
+// --- Save: json.MarshalIndent error ---
+
+func TestSave_MarshalIndentError(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", p)
+	resetConfig(t)
+
+	old := jsonMarshalIndentFn
+	jsonMarshalIndentFn = func(v any, prefix, indent string) ([]byte, error) {
+		return nil, fmt.Errorf("simulated marshal error")
+	}
+	t.Cleanup(func() { jsonMarshalIndentFn = old })
+
+	cfg := &Config{SigningKey: "sk-test"}
+	err := cfg.Save()
+	if err == nil {
+		t.Error("expected error when marshal fails")
+	}
+	if !strings.Contains(err.Error(), "encoding config") {
+		t.Errorf("error should mention 'encoding config', got: %v", err)
 	}
 }

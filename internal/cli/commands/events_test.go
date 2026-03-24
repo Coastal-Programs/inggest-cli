@@ -515,3 +515,151 @@ func TestEventsTypes_Success(t *testing.T) {
 		t.Errorf("expected exactly 1 occurrence of \"test/event\" (deduped), got %d in: %s", count, got)
 	}
 }
+
+func TestEventsSend_StdinReadError(t *testing.T) {
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{EventKey: "test-key"}
+	state.Output = "json"
+	state.DevMode = true
+	state.DevServer = "http://localhost:8288"
+	state.APIBaseURL = "http://localhost:8288"
+	state.AppVersion = "test"
+
+	oldStdin := os.Stdin
+	r, _, _ := os.Pipe()
+	r.Close() // Close immediately to trigger read error
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"send", "test/event"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when stdin read fails")
+	}
+	if !strings.Contains(err.Error(), "reading stdin") {
+		t.Errorf("expected error about reading stdin, got: %v", err)
+	}
+}
+
+func TestEventsSend_SendError(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/e/*": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`server error`))
+		},
+	})
+	defer srv.Close()
+
+	t.Setenv("INNGEST_EVENT_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+
+	state.Config = &config.Config{EventKey: "test-key"}
+	state.Output = "json"
+	state.DevMode = true
+	state.DevServer = srv.URL
+	state.APIBaseURL = srv.URL
+	state.AppVersion = "test"
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"send", "test/event", "--data", `{"key":"val"}`})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when SendEvent fails")
+	}
+	if !strings.Contains(err.Error(), "sending event") {
+		t.Errorf("expected error about sending event, got: %v", err)
+	}
+}
+
+func TestEventsList_Error(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListEvents": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, nil)
+	defer srv.Close()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "json"
+	state.APIBaseURL = srv.URL
+	state.DevServer = srv.URL
+	state.DevMode = false
+	state.Env = ""
+	state.AppVersion = "test"
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"list"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListEvents fails")
+	}
+	if !strings.Contains(err.Error(), "listing events") {
+		t.Errorf("expected error about listing events, got: %v", err)
+	}
+}
+
+func TestEventsTypes_InvalidSince(t *testing.T) {
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "json"
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"types", "--since", "notaduration"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --since duration")
+	}
+	if !strings.Contains(err.Error(), "invalid --since") {
+		t.Errorf("expected error about invalid --since, got: %v", err)
+	}
+}
+
+func TestEventsTypes_ListError(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"ListEvents": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+	}, nil)
+	defer srv.Close()
+
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_EVENT_KEY", "")
+
+	state.Config = &config.Config{SigningKey: "signkey-test-123"}
+	state.Output = "json"
+	state.APIBaseURL = srv.URL
+	state.DevServer = srv.URL
+	state.DevMode = false
+	state.Env = ""
+	state.AppVersion = "test"
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"types"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListEvents fails")
+	}
+	if !strings.Contains(err.Error(), "listing events") {
+		t.Errorf("expected error about listing events, got: %v", err)
+	}
+}

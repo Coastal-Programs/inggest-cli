@@ -74,3 +74,14 @@ func TestGetREST_ReadBodyError(t *testing.T) {
 		t.Errorf("expected error to contain 'read GET response', got: %v", err)
 	}
 }
+
+func TestGetREST_NewRequestError(t *testing.T) {
+	client := NewClient(ClientOptions{APIBaseURL: "http://invalid\x00host"})
+	err := client.GetREST(context.Background(), "test", nil)
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "create GET request") {
+		t.Errorf("expected 'create GET request' error, got: %v", err)
+	}
+}
