@@ -1,0 +1,46 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Coastal-Programs/inggest-cli
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gosec
+    - govet
+    - gocritic
+    - goconst
+    - gocyclo
+    - ineffassign
+    - misspell
+    - nakedret
+    - nilerr
+    - prealloc
+    - unconvert
+    - unparam
+    - unused
+    - modernize
+    - intrange
+  settings:
+    gocyclo:
+      min-complexity: 15
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - linters: [errcheck, gosec, gocritic, gocyclo]
+        path: _test\.go

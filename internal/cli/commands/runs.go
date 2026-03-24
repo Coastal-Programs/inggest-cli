@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 // NewRunsCmd returns the "runs" command group.
@@ -87,7 +88,7 @@ func newRunsListCmd() *cobra.Command {
 				return printRunsTable(conn)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"runs":       runsFromEdges(conn.Edges),
 				"totalCount": conn.TotalCount,
 				"pageInfo":   conn.PageInfo,
@@ -260,7 +261,7 @@ func newRunsCancelCmd() *cobra.Command {
 			if !force {
 				fmt.Fprintf(os.Stderr, "Cancel run %s? [y/N] ", runID)
 				var confirm string
-				fmt.Scanln(&confirm)
+				_, _ = fmt.Scanln(&confirm)
 				if strings.ToLower(confirm) != "y" && strings.ToLower(confirm) != "yes" {
 					fmt.Fprintln(os.Stderr, "Cancelled.")
 					return nil
@@ -272,7 +273,7 @@ func newRunsCancelCmd() *cobra.Command {
 				return fmt.Errorf("cancelling run: %w", err)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"id":     run.ID,
 				"status": run.Status,
 			}, format)
@@ -300,7 +301,7 @@ func newRunsReplayCmd() *cobra.Command {
 				return fmt.Errorf("replaying run: %w", err)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"originalRunID": args[0],
 				"newRunID":      newRunID,
 			}, format)

@@ -3,19 +3,136 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 // maxPages is the upper bound on pagination loops to prevent OOM/hangs on
 // high-volume accounts. At 100 runs per page this caps at 5 000 runs.
 const maxPages = 50
+
+// paginateRuns fetches runs using pagination until all matching runs are retrieved
+// or the page limit is reached.
+func paginateRuns(ctx context.Context, client *inngest.Client, opts inngest.ListRunsOptions, w io.Writer) ([]inngest.FunctionRun, bool, error) {
+	var allRuns []inngest.FunctionRun
+	cursor := opts.After
+	truncated := false
+	for page := 0; ; page++ {
+		opts.After = cursor
+		conn, err := client.ListRuns(ctx, opts)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, edge := range conn.Edges {
+			allRuns = append(allRuns, edge.Node)
+		}
+		if !conn.PageInfo.HasNextPage || conn.PageInfo.EndCursor == "" {
+			break
+		}
+		cursor = conn.PageInfo.EndCursor
+		if page+1 >= maxPages {
+			fmt.Fprintf(w, "Warning: pagination limit reached (%d pages). Results may be incomplete.\n", maxPages)
+			truncated = true
+			break
+		}
+	}
+	return allRuns, truncated, nil
+}
+
+// computeMetrics calculates run metrics from a list of runs.
+func computeMetrics(allRuns []inngest.FunctionRun, since string, truncated bool) map[string]any {
+	total := len(allRuns)
+	statusCounts := map[string]int{}
+	var durations []time.Duration
+
+	for _, run := range allRuns {
+		statusCounts[run.Status]++
+		if run.StartedAt != nil && run.EndedAt != nil {
+			durations = append(durations, run.EndedAt.Sub(*run.StartedAt))
+		}
+	}
+
+	completed := statusCounts["COMPLETED"]
+	failed := statusCounts["FAILED"]
+	running := statusCounts["RUNNING"]
+	cancelled := statusCounts["CANCELLED"]
+
+	successRate := 0.0
+	failureRate := 0.0
+	if total > 0 {
+		successRate = float64(completed) / float64(total) * 100
+		failureRate = float64(failed) / float64(total) * 100
+	}
+
+	slices.Sort(durations)
+
+	percentile := func(p float64) time.Duration {
+		if len(durations) == 0 {
+			return 0
+		}
+		idx := int(float64(len(durations)-1) * p)
+		return durations[idx]
+	}
+
+	p50 := percentile(0.5)
+	p90 := percentile(0.9)
+	p99 := percentile(0.99)
+
+	result := map[string]any{
+		"period":      since,
+		"total":       total,
+		"completed":   completed,
+		"failed":      failed,
+		"running":     running,
+		"cancelled":   cancelled,
+		"successRate": fmt.Sprintf("%.1f%%", successRate),
+		"failureRate": fmt.Sprintf("%.1f%%", failureRate),
+	}
+
+	if len(durations) > 0 {
+		result["durationSamples"] = len(durations)
+		result["p50"] = p50.Round(time.Millisecond).String()
+		result["p90"] = p90.Round(time.Millisecond).String()
+		result["p99"] = p99.Round(time.Millisecond).String()
+	}
+
+	if truncated {
+		result["truncated"] = true
+		result["truncatedAt"] = total
+	}
+
+	return result
+}
+
+// printMetricsText prints metrics in human-readable text format.
+func printMetricsText(result map[string]any) {
+	fmt.Printf("Metrics (last %s):\n\n", result["period"])
+	fmt.Printf("  Total runs:    %d\n", result["total"])
+	fmt.Printf("  Completed:     %d\n", result["completed"])
+	fmt.Printf("  Failed:        %d\n", result["failed"])
+	fmt.Printf("  Running:       %d\n", result["running"])
+	fmt.Printf("  Cancelled:     %d\n", result["cancelled"])
+	fmt.Printf("  Success rate:  %s\n", result["successRate"])
+	fmt.Printf("  Failure rate:  %s\n", result["failureRate"])
+	if samples, ok := result["durationSamples"]; ok {
+		fmt.Printf("\n  Duration (%d samples):\n", samples)
+		fmt.Printf("    P50:  %s\n", result["p50"])
+		fmt.Printf("    P90:  %s\n", result["p90"])
+		fmt.Printf("    P99:  %s\n", result["p99"])
+	}
+	if _, ok := result["truncated"]; ok {
+		fmt.Printf("\n  Note: results truncated at %d runs. Use --since with a shorter duration for complete metrics.\n", result["truncatedAt"])
+	}
+}
 
 // NewHealthCmd returns the top-level "health" command.
 func NewHealthCmd() *cobra.Command {
@@ -70,7 +187,7 @@ func NewHealthCmd() *cobra.Command {
 			}
 
 			// 3. API reachability (simple connectivity check)
-			var probe interface{}
+			var probe any
 			err := client.ExecuteGraphQL(ctx, "HealthCheck", `query HealthCheck { __typename }`, nil, &probe)
 			if err != nil {
 				results = append(results, checkResult{
@@ -130,7 +247,7 @@ func NewHealthCmd() *cobra.Command {
 					fmt.Println("\nAll checks passed.")
 				}
 			} else {
-				_ = output.Print(map[string]interface{}{
+				_ = output.Print(map[string]any{
 					"checks":  results,
 					"healthy": allPassed,
 				}, format)
@@ -167,123 +284,22 @@ func NewMetricsCmd() *cobra.Command {
 			}
 			fromTime := time.Now().Add(-duration)
 
-			// Fetch all runs in the period by paginating.
-			var allRuns []inngest.FunctionRun
-			var cursor string
-			truncated := false
-			page := 0
-			for {
-				opts := inngest.ListRunsOptions{
-					First: 100,
-					After: cursor,
-					From:  fromTime,
-				}
-				if function != "" {
-					opts.FunctionIDs = []string{function}
-				}
-
-				conn, err := client.ListRuns(ctx, opts)
-				if err != nil {
-					return fmt.Errorf("querying runs: %w", err)
-				}
-
-				for _, edge := range conn.Edges {
-					allRuns = append(allRuns, edge.Node)
-				}
-
-				if !conn.PageInfo.HasNextPage || conn.PageInfo.EndCursor == "" {
-					break
-				}
-				cursor = conn.PageInfo.EndCursor
-
-				page++
-				if page >= maxPages {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: pagination limit reached (%d pages). Results may be incomplete.\n", maxPages)
-					truncated = true
-					break
-				}
+			opts := inngest.ListRunsOptions{
+				First: 100,
+				From:  fromTime,
+			}
+			if function != "" {
+				opts.FunctionIDs = []string{function}
+			}
+			allRuns, truncated, err := paginateRuns(ctx, client, opts, cmd.ErrOrStderr())
+			if err != nil {
+				return fmt.Errorf("querying runs: %w", err)
 			}
 
-			// Compute metrics.
-			total := len(allRuns)
-			statusCounts := map[string]int{}
-			var durations []time.Duration
-
-			for _, run := range allRuns {
-				statusCounts[run.Status]++
-				if run.StartedAt != nil && run.EndedAt != nil {
-					durations = append(durations, run.EndedAt.Sub(*run.StartedAt))
-				}
-			}
-
-			completed := statusCounts["COMPLETED"]
-			failed := statusCounts["FAILED"]
-			running := statusCounts["RUNNING"]
-			cancelled := statusCounts["CANCELLED"]
-
-			successRate := 0.0
-			failureRate := 0.0
-			if total > 0 {
-				successRate = float64(completed) / float64(total) * 100
-				failureRate = float64(failed) / float64(total) * 100
-			}
-
-			// Compute duration percentiles.
-			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-
-			percentile := func(p float64) time.Duration {
-				if len(durations) == 0 {
-					return 0
-				}
-				idx := int(float64(len(durations)-1) * p)
-				return durations[idx]
-			}
-
-			p50 := percentile(0.5)
-			p90 := percentile(0.9)
-			p99 := percentile(0.99)
-
-			result := map[string]interface{}{
-				"period":      since,
-				"total":       total,
-				"completed":   completed,
-				"failed":      failed,
-				"running":     running,
-				"cancelled":   cancelled,
-				"successRate": fmt.Sprintf("%.1f%%", successRate),
-				"failureRate": fmt.Sprintf("%.1f%%", failureRate),
-			}
-
-			if len(durations) > 0 {
-				result["durationSamples"] = len(durations)
-				result["p50"] = p50.Round(time.Millisecond).String()
-				result["p90"] = p90.Round(time.Millisecond).String()
-				result["p99"] = p99.Round(time.Millisecond).String()
-			}
-
-			if truncated {
-				result["truncated"] = true
-				result["truncatedAt"] = total
-			}
+			result := computeMetrics(allRuns, since, truncated)
 
 			if format == output.FormatText || format == output.FormatTable {
-				fmt.Printf("Metrics (last %s):\n\n", since)
-				fmt.Printf("  Total runs:    %d\n", total)
-				fmt.Printf("  Completed:     %d\n", completed)
-				fmt.Printf("  Failed:        %d\n", failed)
-				fmt.Printf("  Running:       %d\n", running)
-				fmt.Printf("  Cancelled:     %d\n", cancelled)
-				fmt.Printf("  Success rate:  %.1f%%\n", successRate)
-				fmt.Printf("  Failure rate:  %.1f%%\n", failureRate)
-				if len(durations) > 0 {
-					fmt.Printf("\n  Duration (%d samples):\n", len(durations))
-					fmt.Printf("    P50:  %s\n", p50.Round(time.Millisecond))
-					fmt.Printf("    P90:  %s\n", p90.Round(time.Millisecond))
-					fmt.Printf("    P99:  %s\n", p99.Round(time.Millisecond))
-				}
-				if truncated {
-					fmt.Printf("\n  Note: results truncated at %d runs. Use --since with a shorter duration for complete metrics.\n", total)
-				}
+				printMetricsText(result)
 				return nil
 			}
 
@@ -295,6 +311,45 @@ func NewMetricsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&function, "function", "", "Filter by function ID")
 
 	return cmd
+}
+
+type backlogEntry struct {
+	Function string `json:"function"`
+	Running  int    `json:"running"`
+	Queued   int    `json:"queued"`
+	Total    int    `json:"total"`
+}
+
+// groupRunsByFunction groups runs by function name, sorted by total descending.
+func groupRunsByFunction(allRuns []inngest.FunctionRun) []backlogEntry {
+	counts := map[string]*backlogEntry{}
+	for _, run := range allRuns {
+		fnName := "(unknown)"
+		if run.Function != nil {
+			fnName = run.Function.Name
+		}
+		entry, ok := counts[fnName]
+		if !ok {
+			entry = &backlogEntry{Function: fnName}
+			counts[fnName] = entry
+		}
+		switch run.Status {
+		case "RUNNING":
+			entry.Running++
+		case "QUEUED":
+			entry.Queued++
+		}
+		entry.Total++
+	}
+
+	entries := make([]backlogEntry, 0, len(counts))
+	for _, e := range counts {
+		entries = append(entries, *e)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Total > entries[j].Total
+	})
+	return entries
 }
 
 // NewBacklogCmd returns the top-level "backlog" command.
@@ -312,75 +367,22 @@ func NewBacklogCmd() *cobra.Command {
 			var allRuns []inngest.FunctionRun
 			truncated := false
 			for _, status := range []string{"RUNNING", "QUEUED"} {
-				var cursor string
-				page := 0
-				for {
-					opts := inngest.ListRunsOptions{
-						First:  100,
-						After:  cursor,
-						Status: []string{status},
-						From:   time.Now().Add(-24 * time.Hour),
-					}
-
-					conn, err := client.ListRuns(ctx, opts)
-					if err != nil {
-						return fmt.Errorf("querying %s runs: %w", strings.ToLower(status), err)
-					}
-
-					for _, edge := range conn.Edges {
-						allRuns = append(allRuns, edge.Node)
-					}
-
-					if !conn.PageInfo.HasNextPage || conn.PageInfo.EndCursor == "" {
-						break
-					}
-					cursor = conn.PageInfo.EndCursor
-
-					page++
-					if page >= maxPages {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: pagination limit reached (%d pages) for %s runs. Results may be incomplete.\n", maxPages, strings.ToLower(status))
-						truncated = true
-						break
-					}
+				opts := inngest.ListRunsOptions{
+					First:  100,
+					Status: []string{status},
+					From:   time.Now().Add(-24 * time.Hour),
+				}
+				runs, trunc, err := paginateRuns(ctx, client, opts, cmd.ErrOrStderr())
+				if err != nil {
+					return fmt.Errorf("querying %s runs: %w", strings.ToLower(status), err)
+				}
+				allRuns = append(allRuns, runs...)
+				if trunc {
+					truncated = true
 				}
 			}
 
-			// Group by function name.
-			type backlogEntry struct {
-				Function string `json:"function"`
-				Running  int    `json:"running"`
-				Queued   int    `json:"queued"`
-				Total    int    `json:"total"`
-			}
-
-			counts := map[string]*backlogEntry{}
-			for _, run := range allRuns {
-				fnName := "(unknown)"
-				if run.Function != nil {
-					fnName = run.Function.Name
-				}
-				entry, ok := counts[fnName]
-				if !ok {
-					entry = &backlogEntry{Function: fnName}
-					counts[fnName] = entry
-				}
-				switch run.Status {
-				case "RUNNING":
-					entry.Running++
-				case "QUEUED":
-					entry.Queued++
-				}
-				entry.Total++
-			}
-
-			// Sort by total descending.
-			entries := make([]backlogEntry, 0, len(counts))
-			for _, e := range counts {
-				entries = append(entries, *e)
-			}
-			sort.Slice(entries, func(i, j int) bool {
-				return entries[i].Total > entries[j].Total
-			})
+			entries := groupRunsByFunction(allRuns)
 
 			if len(entries) == 0 {
 				if format == output.FormatText || format == output.FormatTable {
@@ -390,14 +392,12 @@ func NewBacklogCmd() *cobra.Command {
 				return output.Print([]backlogEntry{}, format)
 			}
 
-			if truncated {
-				if format == output.FormatText || format == output.FormatTable {
-					fmt.Printf("\nNote: results truncated at %d runs. Use --since with a shorter duration for complete metrics.\n", len(allRuns))
-				}
+			if truncated && (format == output.FormatText || format == output.FormatTable) {
+				fmt.Printf("\nNote: results truncated at %d runs. Use --since with a shorter duration for complete metrics.\n", len(allRuns))
 			}
 
 			if format == output.FormatJSON {
-				result := map[string]interface{}{
+				result := map[string]any{
 					"entries": entries,
 				}
 				if truncated {
@@ -405,10 +405,6 @@ func NewBacklogCmd() *cobra.Command {
 					result["truncatedAt"] = len(allRuns)
 				}
 				return output.Print(result, format)
-			}
-
-			if format == output.FormatTable {
-				return output.Print(entries, output.FormatTable)
 			}
 
 			return output.Print(entries, format)

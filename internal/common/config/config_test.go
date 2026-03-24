@@ -293,11 +293,11 @@ func TestGetSigningKey_FallsBackToEnvVar(t *testing.T) {
 	}
 }
 
-func TestGetSigningKey_ConfigTakesPrecedence(t *testing.T) {
+func TestGetSigningKey_EnvTakesPrecedence(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "sk-from-env")
 	cfg := &Config{SigningKey: "sk-from-config"}
-	if got := cfg.GetSigningKey(); got != "sk-from-config" {
-		t.Errorf("got %q, want sk-from-config", got)
+	if got := cfg.GetSigningKey(); got != "sk-from-env" {
+		t.Errorf("got %q, want sk-from-env", got)
 	}
 }
 
@@ -318,11 +318,11 @@ func TestGetSigningKeyFallback_FallsBackToEnvVar(t *testing.T) {
 	}
 }
 
-func TestGetSigningKeyFallback_ConfigTakesPrecedence(t *testing.T) {
+func TestGetSigningKeyFallback_EnvTakesPrecedence(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "sk-fallback-from-env")
 	cfg := &Config{SigningKeyFallback: "sk-fallback-from-config"}
-	if got := cfg.GetSigningKeyFallback(); got != "sk-fallback-from-config" {
-		t.Errorf("got %q, want sk-fallback-from-config", got)
+	if got := cfg.GetSigningKeyFallback(); got != "sk-fallback-from-env" {
+		t.Errorf("got %q, want sk-fallback-from-env", got)
 	}
 }
 

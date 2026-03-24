@@ -260,7 +260,7 @@ func TestPrint_Table_PointerToSlice(t *testing.T) {
 
 func TestPrint_Text_SliceWithUnmarshalableElement(t *testing.T) {
 	got, err := captureStdout(t, func() error {
-		return output.Print([]interface{}{make(chan int)}, output.FormatText)
+		return output.Print([]any{make(chan int)}, output.FormatText)
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

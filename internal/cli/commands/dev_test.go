@@ -13,6 +13,11 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 )
 
+const (
+	testDevServerURL = "http://localhost:8288"
+	testAppVersion   = "test"
+)
+
 func TestDevCmdHasSubcommands(t *testing.T) {
 	cmd := NewDevCmd()
 
@@ -41,9 +46,9 @@ func TestDevCmdHasSubcommands(t *testing.T) {
 
 func TestDevSendRequiresArg(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
-	state.DevServer = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.DevServer = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	cmd := NewDevCmd()
 	cmd.SetArgs([]string{"send"})
@@ -59,9 +64,9 @@ func TestDevSendRequiresArg(t *testing.T) {
 
 func TestDevSendInvalidData(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
-	state.DevServer = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.DevServer = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	cmd := NewDevCmd()
 	cmd.SetArgs([]string{"send", "test/event", "--data", "not-json"})
@@ -80,9 +85,9 @@ func TestDevSendInvalidData(t *testing.T) {
 
 func TestDevInvokeRequiresArg(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
-	state.DevServer = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.DevServer = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	cmd := NewDevCmd()
 	cmd.SetArgs([]string{"invoke"})
@@ -98,9 +103,9 @@ func TestDevInvokeRequiresArg(t *testing.T) {
 
 func TestDevInvokeInvalidData(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
-	state.DevServer = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.DevServer = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	cmd := NewDevCmd()
 	cmd.SetArgs([]string{"invoke", "my-func", "--data", "not-json"})
@@ -119,9 +124,9 @@ func TestDevInvokeInvalidData(t *testing.T) {
 
 func TestDevRunsInvalidSince(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
-	state.DevServer = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.DevServer = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	cmd := NewDevCmd()
 	cmd.SetArgs([]string{"runs", "--since", "notaduration"})
@@ -139,7 +144,7 @@ func TestDevRunsInvalidSince(t *testing.T) {
 }
 
 func TestNewDevClient(t *testing.T) {
-	state.DevServer = "http://localhost:8288"
+	state.DevServer = testDevServerURL
 	state.AppVersion = "v1.0.0"
 
 	client := newDevClient()
@@ -163,8 +168,8 @@ func TestDevStatus_Online(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -179,7 +184,7 @@ func TestDevStatus_Online(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -202,8 +207,8 @@ func TestDevStatus_Offline(t *testing.T) {
 	srv.Close() // close immediately so the server is unreachable
 
 	state.DevServer = closedURL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -218,7 +223,7 @@ func TestDevStatus_Offline(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -235,8 +240,8 @@ func TestDevFunctions(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -251,7 +256,7 @@ func TestDevFunctions(t *testing.T) {
 		}
 	})
 
-	var result []map[string]interface{}
+	var result []map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON array output: %v\nraw output: %s", err, got)
 	}
@@ -271,8 +276,8 @@ func TestDevRuns_Success(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -303,8 +308,8 @@ func TestDevSend_Success(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -338,8 +343,8 @@ func TestDevInvoke_Success(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -373,8 +378,8 @@ func TestDevInvoke_NoData(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -408,8 +413,8 @@ func TestDevSend_Stdin(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	// Feed JSON via stdin pipe.
@@ -440,9 +445,9 @@ func TestDevSend_Stdin(t *testing.T) {
 }
 
 func TestDevSend_StdinInvalidJSON(t *testing.T) {
-	state.DevServer = "http://localhost:8288"
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.DevServer = testDevServerURL
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	// Feed invalid JSON via stdin pipe.
@@ -480,8 +485,8 @@ func TestDevSend_StdinEmpty(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	// Feed empty stdin.
@@ -530,8 +535,8 @@ func TestDevEvents_Success(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -561,8 +566,8 @@ func TestDevEvents_NameFilter(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -587,9 +592,9 @@ func TestDevEvents_NameFilter(t *testing.T) {
 
 func TestDevEvents_LimitFilter(t *testing.T) {
 	// Build 5 events for the mock response.
-	events := make([]map[string]interface{}, 5)
-	for i := 0; i < 5; i++ {
-		events[i] = map[string]interface{}{
+	events := make([]map[string]any, 5)
+	for i := range 5 {
+		events[i] = map[string]any{
 			"id":        fmt.Sprintf("evt-%d", i+1),
 			"name":      fmt.Sprintf("event/%d", i+1),
 			"createdAt": "2024-01-01T00:00:00Z",
@@ -606,8 +611,8 @@ func TestDevEvents_LimitFilter(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -622,7 +627,7 @@ func TestDevEvents_LimitFilter(t *testing.T) {
 		}
 	})
 
-	var result []map[string]interface{}
+	var result []map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON array output: %v\nraw output: %s", err, got)
 	}
@@ -659,8 +664,8 @@ func TestDevStatus_GetDevInfoError(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -685,8 +690,8 @@ func TestDevFunctions_GraphQLError(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -711,8 +716,8 @@ func TestDevRuns_StatusAndFunctionFilters(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -740,8 +745,8 @@ func TestDevRuns_GraphQLError(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -760,9 +765,9 @@ func TestDevRuns_GraphQLError(t *testing.T) {
 
 // dev.go:223 – stdin read error in newDevSendCmd.
 func TestDevSend_StdinReadError(t *testing.T) {
-	state.DevServer = "http://localhost:8288"
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.DevServer = testDevServerURL
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	// Replace stdin with a closed file descriptor to trigger io.ReadAll error.
@@ -797,8 +802,8 @@ func TestDevSend_SendDevEventError(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -826,8 +831,8 @@ func TestDevInvoke_InvokeDevFunctionError(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()
@@ -852,8 +857,8 @@ func TestDevEvents_GraphQLError(t *testing.T) {
 	defer srv.Close()
 
 	state.DevServer = srv.URL
-	state.Output = "json"
-	state.AppVersion = "test"
+	state.Output = testOutputJSON
+	state.AppVersion = testAppVersion
 	state.Config = &config.Config{}
 
 	cmd := NewDevCmd()

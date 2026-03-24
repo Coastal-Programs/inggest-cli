@@ -6,7 +6,7 @@ Built for AI agents, shell scripts, and CI/CD pipelines.
 - **Module:** `github.com/Coastal-Programs/inggest-cli`
 - **Binary:** `inngest`
 - **Config:** `~/.config/inngest/cli.json`
-- **Only external dep:** `github.com/spf13/cobra v1.8.1` — prefer stdlib for everything else
+- **External deps:** `github.com/spf13/cobra v1.10.2`, `golang.org/x/term` — prefer stdlib for everything else
 
 ## Commands
 

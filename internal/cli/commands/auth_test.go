@@ -16,6 +16,15 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 )
 
+const (
+	testOutputJSON             = "json"
+	testSourceEnvSigningKey    = "env (INNGEST_SIGNING_KEY)"
+	testSourceConfigEnvAlsoSet = "config (env var also set)"
+	testNotConfigured          = "not configured"
+	testSourceEnvEventKey      = "env (INNGEST_EVENT_KEY)"
+	testSourceConfig           = "config"
+)
+
 func TestAuthCmdHasSubcommands(t *testing.T) {
 	cmd := NewAuthCmd()
 
@@ -41,7 +50,7 @@ func TestAuthCmdHasSubcommands(t *testing.T) {
 
 func TestAuthLoginInvalidKey(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"login", "--signing-key", "bad-key"})
@@ -60,7 +69,7 @@ func TestAuthLoginInvalidKey(t *testing.T) {
 
 func TestAuthLoginNoKey(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	// Clear env var so the command can't pick it up from environment.
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -88,7 +97,7 @@ func TestAuthLoginWithSigningKey(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-abc123"})
@@ -121,7 +130,7 @@ func TestAuthLoginWithEventKey(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-abc123", "--event-key", "evt-key-xyz"})
@@ -151,7 +160,7 @@ func TestAuthLogout(t *testing.T) {
 		SigningKey: "signkey-test-abc123",
 		EventKey:   "evt-key-xyz",
 	}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"logout"})
@@ -176,10 +185,10 @@ func TestAuthLoginKeyFromEnv(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "cli.json")
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
-	t.Setenv("INNGEST_SIGNING_KEY", "signkey-from-env-999")
+	t.Setenv("INNGEST_SIGNING_KEY", "signkey-test-aabb9900")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	// No --signing-key flag; the command should fall back to the env var.
@@ -193,8 +202,8 @@ func TestAuthLoginKeyFromEnv(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if state.Config.SigningKey != "signkey-from-env-999" {
-		t.Errorf("expected signing key %q from env, got %q", "signkey-from-env-999", state.Config.SigningKey)
+	if state.Config.SigningKey != "signkey-test-aabb9900" {
+		t.Errorf("expected signing key %q from env, got %q", "signkey-test-aabb9900", state.Config.SigningKey)
 	}
 }
 
@@ -240,7 +249,7 @@ func TestAuthStatus_WithSigningKey(t *testing.T) {
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -254,7 +263,7 @@ func TestAuthStatus_WithSigningKey(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -281,7 +290,7 @@ func TestAuthStatus_NotConfigured(t *testing.T) {
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -295,7 +304,7 @@ func TestAuthStatus_NotConfigured(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -322,7 +331,7 @@ func TestAuthStatus_APIValidationFailed(t *testing.T) {
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -336,7 +345,7 @@ func TestAuthStatus_APIValidationFailed(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -352,7 +361,7 @@ func TestAuthStatus_SigningKeyFromEnv(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 	config.ResetForTest()
 
-	t.Setenv("INNGEST_SIGNING_KEY", "signkey-test-env123")
+	t.Setenv("INNGEST_SIGNING_KEY", "signkey-test-eee12300")
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
@@ -363,7 +372,7 @@ func TestAuthStatus_SigningKeyFromEnv(t *testing.T) {
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -377,13 +386,13 @@ func TestAuthStatus_SigningKeyFromEnv(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["signing_key_source"].(string); !ok || v != "env (INNGEST_SIGNING_KEY)" {
-		t.Errorf("expected signing_key_source=%q, got %v", "env (INNGEST_SIGNING_KEY)", result["signing_key_source"])
+	if v, ok := result["signing_key_source"].(string); !ok || v != testSourceEnvSigningKey {
+		t.Errorf("expected signing_key_source=%q, got %v", testSourceEnvSigningKey, result["signing_key_source"])
 	}
 }
 
@@ -393,18 +402,18 @@ func TestAuthStatus_SigningKeyFromBoth(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 	config.ResetForTest()
 
-	t.Setenv("INNGEST_SIGNING_KEY", "signkey-test-envboth")
+	t.Setenv("INNGEST_SIGNING_KEY", "signkey-test-aabb0011")
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	srv := newAuthCheckMockServer(true)
 	defer srv.Close()
 
-	state.Config = &config.Config{SigningKey: "signkey-test-cfgboth"}
+	state.Config = &config.Config{SigningKey: "signkey-test-ccbb0022"}
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -418,13 +427,13 @@ func TestAuthStatus_SigningKeyFromBoth(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["signing_key_source"].(string); !ok || v != "config (env var also set)" {
-		t.Errorf("expected signing_key_source=%q, got %v", "config (env var also set)", result["signing_key_source"])
+	if v, ok := result["signing_key_source"].(string); !ok || v != testSourceConfigEnvAlsoSet {
+		t.Errorf("expected signing_key_source=%q, got %v", testSourceConfigEnvAlsoSet, result["signing_key_source"])
 	}
 }
 
@@ -435,8 +444,8 @@ func TestValidateSigningKey(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "empty string", key: "", wantErr: true},
-		{name: "cloud format test", key: "signkey-test-abc", wantErr: false},
-		{name: "cloud format prod", key: "signkey-prod-xyz", wantErr: false},
+		{name: "cloud format test", key: "signkey-test-abcd", wantErr: false},
+		{name: "cloud format prod", key: "signkey-prod-abcdef12", wantErr: false},
 		{name: "valid hex even length", key: "abcdef0123456789", wantErr: false},
 		{name: "odd length hex", key: "abc", wantErr: true},
 		{name: "invalid hex even length", key: "not-hex-string!!", wantErr: true},
@@ -466,13 +475,13 @@ func TestAuthStatus_FallbackFromConfig(t *testing.T) {
 	defer srv.Close()
 
 	state.Config = &config.Config{
-		SigningKey:         "signkey-test-primary",
-		SigningKeyFallback: "signkey-test-fallback",
+		SigningKey:         "signkey-test-aabb1122",
+		SigningKeyFallback: "signkey-test-ffaabb00",
 	}
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -486,13 +495,13 @@ func TestAuthStatus_FallbackFromConfig(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["signing_key_fallback"].(string); !ok || v == "not configured" {
-		t.Errorf("expected signing_key_fallback to not be %q, got %v", "not configured", result["signing_key_fallback"])
+	if v, ok := result["signing_key_fallback"].(string); !ok || v == testNotConfigured {
+		t.Errorf("expected signing_key_fallback to not be %q, got %v", testNotConfigured, result["signing_key_fallback"])
 	}
 }
 
@@ -510,7 +519,7 @@ func TestAuthStatus_EventKeyFromEnv(t *testing.T) {
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -524,13 +533,13 @@ func TestAuthStatus_EventKeyFromEnv(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["event_key_source"].(string); !ok || v != "env (INNGEST_EVENT_KEY)" {
-		t.Errorf("expected event_key_source=%q, got %v", "env (INNGEST_EVENT_KEY)", result["event_key_source"])
+	if v, ok := result["event_key_source"].(string); !ok || v != testSourceEnvEventKey {
+		t.Errorf("expected event_key_source=%q, got %v", testSourceEnvEventKey, result["event_key_source"])
 	}
 }
 
@@ -550,7 +559,7 @@ func TestAuthStatus_CustomAPIURL(t *testing.T) {
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -564,7 +573,7 @@ func TestAuthStatus_CustomAPIURL(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -582,10 +591,10 @@ func TestAuthLoginWithSigningKeyFallback(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
-	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-primary", "--signing-key-fallback", "signkey-test-fallback"})
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-aabb1122", "--signing-key-fallback", "signkey-test-ffaabb00"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -596,11 +605,11 @@ func TestAuthLoginWithSigningKeyFallback(t *testing.T) {
 		}
 	})
 
-	if state.Config.SigningKey != "signkey-test-primary" {
-		t.Errorf("expected signing key %q, got %q", "signkey-test-primary", state.Config.SigningKey)
+	if state.Config.SigningKey != "signkey-test-aabb1122" {
+		t.Errorf("expected signing key %q, got %q", "signkey-test-aabb1122", state.Config.SigningKey)
 	}
-	if state.Config.SigningKeyFallback != "signkey-test-fallback" {
-		t.Errorf("expected signing key fallback %q, got %q", "signkey-test-fallback", state.Config.SigningKeyFallback)
+	if state.Config.SigningKeyFallback != "signkey-test-ffaabb00" {
+		t.Errorf("expected signing key fallback %q, got %q", "signkey-test-ffaabb00", state.Config.SigningKeyFallback)
 	}
 	// Output should contain redacted fallback
 	if !strings.Contains(got, "signing_key_fallback") {
@@ -613,13 +622,13 @@ func TestAuthLoginFallbackFromEnv(t *testing.T) {
 	cfgPath := filepath.Join(tmp, "cli.json")
 	config.ResetForTest()
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
-	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-envfallback")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-eeff0011")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
-	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-primary"})
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-aabb1122"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -628,18 +637,18 @@ func TestAuthLoginFallbackFromEnv(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if state.Config.SigningKeyFallback != "signkey-test-envfallback" {
-		t.Errorf("expected signing key fallback %q, got %q", "signkey-test-envfallback", state.Config.SigningKeyFallback)
+	if state.Config.SigningKeyFallback != "signkey-test-eeff0011" {
+		t.Errorf("expected signing key fallback %q, got %q", "signkey-test-eeff0011", state.Config.SigningKeyFallback)
 	}
 }
 
 func TestAuthLoginInvalidFallbackKey(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "")
 
 	cmd := NewAuthCmd()
-	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-primary", "--signing-key-fallback", "bad-fallback"})
+	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-aabb1122", "--signing-key-fallback", "bad-fallback"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -672,7 +681,7 @@ func TestAuthLogin_SaveError(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"login", "--signing-key", "signkey-test-abc123"})
@@ -697,7 +706,7 @@ func TestAuthLogout_SaveError(t *testing.T) {
 		SigningKey: "signkey-test-abc123",
 		EventKey:   "evt-key-xyz",
 	}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"logout"})
@@ -721,14 +730,14 @@ func TestAuthStatus_FallbackFromEnv(t *testing.T) {
 	config.ResetForTest()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
-	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-envfallback")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-eeff0011")
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
-	state.Config = &config.Config{SigningKey: "signkey-test-primary"}
+	state.Config = &config.Config{SigningKey: "signkey-test-aabb1122"}
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -742,7 +751,7 @@ func TestAuthStatus_FallbackFromEnv(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -759,17 +768,17 @@ func TestAuthStatus_FallbackFromBoth(t *testing.T) {
 	config.ResetForTest()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
-	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-envfallback")
+	t.Setenv("INNGEST_SIGNING_KEY_FALLBACK", "signkey-test-eeff0011")
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{
-		SigningKey:         "signkey-test-primary",
-		SigningKeyFallback: "signkey-test-cfgfallback",
+		SigningKey:         "signkey-test-aabb1122",
+		SigningKeyFallback: "signkey-test-ccff0022",
 	}
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -783,13 +792,13 @@ func TestAuthStatus_FallbackFromBoth(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["signing_key_fallback_source"].(string); !ok || v != "config (env var also set)" {
-		t.Errorf("expected signing_key_fallback_source=%q, got %v", "config (env var also set)", result["signing_key_fallback_source"])
+	if v, ok := result["signing_key_fallback_source"].(string); !ok || v != testSourceConfigEnvAlsoSet {
+		t.Errorf("expected signing_key_fallback_source=%q, got %v", testSourceConfigEnvAlsoSet, result["signing_key_fallback_source"])
 	}
 }
 
@@ -807,7 +816,7 @@ func TestAuthStatus_EventKeyFromBoth(t *testing.T) {
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -821,13 +830,13 @@ func TestAuthStatus_EventKeyFromBoth(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["event_key_source"].(string); !ok || v != "config (env var also set)" {
-		t.Errorf("expected event_key_source=%q, got %v", "config (env var also set)", result["event_key_source"])
+	if v, ok := result["event_key_source"].(string); !ok || v != testSourceConfigEnvAlsoSet {
+		t.Errorf("expected event_key_source=%q, got %v", testSourceConfigEnvAlsoSet, result["event_key_source"])
 	}
 }
 
@@ -845,7 +854,7 @@ func TestAuthStatus_EventKeyFromConfig(t *testing.T) {
 	state.APIBaseURL = ""
 	state.DevServer = ""
 	state.Env = ""
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewAuthCmd()
 	cmd.SetArgs([]string{"status"})
@@ -859,13 +868,13 @@ func TestAuthStatus_EventKeyFromConfig(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["event_key_source"].(string); !ok || v != "config" {
-		t.Errorf("expected event_key_source=%q, got %v", "config", result["event_key_source"])
+	if v, ok := result["event_key_source"].(string); !ok || v != testSourceConfig {
+		t.Errorf("expected event_key_source=%q, got %v", testSourceConfig, result["event_key_source"])
 	}
 }
 
@@ -877,7 +886,7 @@ func TestAuthLogin_InteractivePrompt(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	// Mock isInteractive to return true
 	oldInteractive := isInteractiveFn
@@ -890,7 +899,7 @@ func TestAuthLogin_InteractivePrompt(t *testing.T) {
 	readSecretFn = func(prompt string) (string, error) {
 		callCount++
 		if callCount == 1 {
-			return "signkey-test-interactive", nil
+			return "signkey-test-1a2b3c4d", nil
 		}
 		return "evt-interactive-key", nil // event key
 	}
@@ -907,8 +916,8 @@ func TestAuthLogin_InteractivePrompt(t *testing.T) {
 		}
 	})
 
-	if state.Config.SigningKey != "signkey-test-interactive" {
-		t.Errorf("expected signing key %q, got %q", "signkey-test-interactive", state.Config.SigningKey)
+	if state.Config.SigningKey != "signkey-test-1a2b3c4d" {
+		t.Errorf("expected signing key %q, got %q", "signkey-test-1a2b3c4d", state.Config.SigningKey)
 	}
 	if state.Config.EventKey != "evt-interactive-key" {
 		t.Errorf("expected event key %q, got %q", "evt-interactive-key", state.Config.EventKey)
@@ -919,7 +928,7 @@ func TestAuthLogin_InteractiveReadSecretError(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	oldInteractive := isInteractiveFn
 	isInteractiveFn = func() bool { return true }

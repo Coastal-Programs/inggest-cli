@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+const testSendEmailSlug = "send-email"
+
 func TestListFunctions(t *testing.T) {
 	response := `{
 		"data": {
@@ -58,16 +60,16 @@ func TestListFunctions(t *testing.T) {
 	}
 
 	// First function.
-	if fns[0].ID != "fn-1" {
+	if fns[0].ID != testFnID1 {
 		t.Errorf("expected first function ID 'fn-1', got %q", fns[0].ID)
 	}
-	if fns[0].Name != "Send Email" {
+	if fns[0].Name != testSendEmail {
 		t.Errorf("expected first function Name 'Send Email', got %q", fns[0].Name)
 	}
 	if fns[0].Slug != "send-email" {
 		t.Errorf("expected first function Slug 'send-email', got %q", fns[0].Slug)
 	}
-	if fns[0].AppID != "app-1" {
+	if fns[0].AppID != testAppID1 {
 		t.Errorf("expected first function AppID 'app-1', got %q", fns[0].AppID)
 	}
 	if len(fns[0].Triggers) != 1 {
@@ -76,7 +78,7 @@ func TestListFunctions(t *testing.T) {
 	if fns[0].Triggers[0].Type != "event" {
 		t.Errorf("expected trigger type 'event', got %q", fns[0].Triggers[0].Type)
 	}
-	if fns[0].Triggers[0].Value != "user/signup" {
+	if fns[0].Triggers[0].Value != testTriggerUserSignup {
 		t.Errorf("expected trigger value 'user/signup', got %q", fns[0].Triggers[0].Value)
 	}
 
@@ -90,7 +92,7 @@ func TestListFunctions(t *testing.T) {
 	if fns[1].Slug != "process-order" {
 		t.Errorf("expected second function Slug 'process-order', got %q", fns[1].Slug)
 	}
-	if fns[1].AppID != "app-1" {
+	if fns[1].AppID != testAppID1 {
 		t.Errorf("expected second function AppID 'app-1', got %q", fns[1].AppID)
 	}
 	if len(fns[1].Triggers) != 1 {
@@ -188,19 +190,19 @@ func TestGetFunction(t *testing.T) {
 	if fn == nil {
 		t.Fatal("expected non-nil function")
 	}
-	if fn.ID != "fn-1" {
+	if fn.ID != testFnID1 {
 		t.Errorf("expected ID 'fn-1', got %q", fn.ID)
 	}
-	if fn.Name != "Send Email" {
+	if fn.Name != testSendEmail {
 		t.Errorf("expected Name 'Send Email', got %q", fn.Name)
 	}
-	if fn.Slug != "send-email" {
+	if fn.Slug != testSendEmailSlug {
 		t.Errorf("expected Slug 'send-email', got %q", fn.Slug)
 	}
-	if fn.AppID != "app-1" {
+	if fn.AppID != testAppID1 {
 		t.Errorf("expected AppID 'app-1', got %q", fn.AppID)
 	}
-	if fn.URL != "https://example.com/api/inngest" {
+	if fn.URL != testAppURL {
 		t.Errorf("expected URL 'https://example.com/api/inngest', got %q", fn.URL)
 	}
 	if fn.Config != `{"id":"send-email"}` {
@@ -218,7 +220,7 @@ func TestGetFunction(t *testing.T) {
 	if trigger.Type != "event" {
 		t.Errorf("expected trigger Type 'event', got %q", trigger.Type)
 	}
-	if trigger.Value != "user/signup" {
+	if trigger.Value != testTriggerUserSignup {
 		t.Errorf("expected trigger Value 'user/signup', got %q", trigger.Value)
 	}
 	if trigger.Condition != "event.data.active == true" {
@@ -243,10 +245,10 @@ func TestGetFunction(t *testing.T) {
 	if fn.App == nil {
 		t.Fatal("expected non-nil App")
 	}
-	if fn.App.ID != "app-1" {
+	if fn.App.ID != testAppID1 {
 		t.Errorf("expected App.ID 'app-1', got %q", fn.App.ID)
 	}
-	if fn.App.Name != "My App" {
+	if fn.App.Name != testMyApp {
 		t.Errorf("expected App.Name 'My App', got %q", fn.App.Name)
 	}
 	if fn.App.SDKLanguage != "go" {
@@ -258,7 +260,7 @@ func TestGetFunction(t *testing.T) {
 	if fn.App.Framework != "gin" {
 		t.Errorf("expected App.Framework 'gin', got %q", fn.App.Framework)
 	}
-	if fn.App.URL != "https://example.com/api/inngest" {
+	if fn.App.URL != testAppURL {
 		t.Errorf("expected App.URL 'https://example.com/api/inngest', got %q", fn.App.URL)
 	}
 	if fn.App.Connected != true {

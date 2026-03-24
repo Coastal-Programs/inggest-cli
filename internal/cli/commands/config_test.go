@@ -11,6 +11,11 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 )
 
+const (
+	testStaging = "staging"
+	testDefault = "default"
+)
+
 func TestConfigCmdHasSubcommands(t *testing.T) {
 	cmd := NewConfigCmd()
 
@@ -39,7 +44,7 @@ func TestConfigShowRedactsSecrets(t *testing.T) {
 		SigningKey: "signkey-test-abc123",
 		EventKey:   "evt-key-xyz-secret",
 	}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"show"})
@@ -76,9 +81,9 @@ func TestConfigShowRedactsSecrets(t *testing.T) {
 
 func TestConfigGetValidKey(t *testing.T) {
 	state.Config = &config.Config{
-		ActiveEnv: "staging",
+		ActiveEnv: testStaging,
 	}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"get", "active_env"})
@@ -104,7 +109,7 @@ func TestConfigGetValidKey(t *testing.T) {
 
 func TestConfigGetInvalidKey(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"get", "bogus"})
@@ -122,9 +127,9 @@ func TestConfigGetInvalidKey(t *testing.T) {
 
 func TestConfigGetRawFlag(t *testing.T) {
 	state.Config = &config.Config{
-		SigningKey: "signkey-test-rawvalue123",
+		SigningKey: "signkey-test-aabb123456",
 	}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"get", "signing_key", "--raw"})
@@ -140,7 +145,7 @@ func TestConfigGetRawFlag(t *testing.T) {
 		t.Fatalf("unexpected error: %v", execErr)
 	}
 
-	if !strings.Contains(out, "signkey-test-rawvalue123") {
+	if !strings.Contains(out, "signkey-test-aabb123456") {
 		t.Errorf("expected unredacted signing key with --raw flag, got: %s", out)
 	}
 }
@@ -151,7 +156,7 @@ func TestConfigSetAndPersist(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "active_env", "staging"})
@@ -167,8 +172,8 @@ func TestConfigSetAndPersist(t *testing.T) {
 	}
 
 	// Verify in-memory state was updated.
-	if state.Config.ActiveEnv != "staging" {
-		t.Errorf("expected ActiveEnv %q, got %q", "staging", state.Config.ActiveEnv)
+	if state.Config.ActiveEnv != testStaging {
+		t.Errorf("expected ActiveEnv %q, got %q", testStaging, state.Config.ActiveEnv)
 	}
 
 	// Verify config was persisted to disk.
@@ -191,7 +196,7 @@ func TestConfigSetAndPersist(t *testing.T) {
 
 func TestConfigSetSigningKeyValidation(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "signing_key", "bad-key"})
@@ -209,7 +214,7 @@ func TestConfigSetSigningKeyValidation(t *testing.T) {
 
 func TestConfigPath(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"path"})
@@ -265,19 +270,19 @@ func TestIsSecretKey(t *testing.T) {
 func TestConfigSource(t *testing.T) {
 	// Key set in config → "config"
 	cfg := &config.Config{SigningKey: "signkey-test-123456"}
-	if got := configSource(cfg, "signing_key"); got != "config" {
+	if got := configSource(cfg, "signing_key"); got != testSourceConfig {
 		t.Errorf("expected source 'config' for signing_key with value, got %q", got)
 	}
 
 	// Key not set, env var not set → "default"
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 	cfg2 := &config.Config{}
-	if got := configSource(cfg2, "signing_key"); got != "default" {
+	if got := configSource(cfg2, "signing_key"); got != testDefault {
 		t.Errorf("expected source 'default' for empty signing_key, got %q", got)
 	}
 
 	// Key not set, env var set → "env (...)"
-	t.Setenv("INNGEST_SIGNING_KEY", "signkey-from-env-999")
+	t.Setenv("INNGEST_SIGNING_KEY", "signkey-test-aabb9900")
 	cfg3 := &config.Config{}
 	src := configSource(cfg3, "signing_key")
 	if !strings.Contains(src, "env") {
@@ -285,14 +290,14 @@ func TestConfigSource(t *testing.T) {
 	}
 
 	// active_env set in config → "config"
-	cfg4 := &config.Config{ActiveEnv: "staging"}
-	if got := configSource(cfg4, "active_env"); got != "config" {
+	cfg4 := &config.Config{ActiveEnv: testStaging}
+	if got := configSource(cfg4, "active_env"); got != testSourceConfig {
 		t.Errorf("expected source 'config' for active_env with value, got %q", got)
 	}
 
 	// active_env not set → "default"
 	cfg5 := &config.Config{}
-	if got := configSource(cfg5, "active_env"); got != "default" {
+	if got := configSource(cfg5, "active_env"); got != testDefault {
 		t.Errorf("expected source 'default' for empty active_env, got %q", got)
 	}
 
@@ -309,7 +314,7 @@ func TestConfigSetEventKey(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "event_key", "my-event-key-123"})
@@ -341,7 +346,7 @@ func TestConfigSetAPIBaseURL(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "api_base_url", "https://custom.inngest.com"})
@@ -368,7 +373,7 @@ func TestConfigSetDevServerURL(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "dev_server_url", "http://localhost:9999"})
@@ -390,7 +395,7 @@ func TestConfigSetDevServerURL(t *testing.T) {
 
 func TestConfigSetInvalidKey(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "bogus_key", "value"})
@@ -413,10 +418,10 @@ func TestConfigSetValidSigningKey(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
-	cmd.SetArgs([]string{"set", "signing_key", "signkey-test-valid123"})
+	cmd.SetArgs([]string{"set", "signing_key", "signkey-test-aa11dd22"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 
@@ -428,8 +433,8 @@ func TestConfigSetValidSigningKey(t *testing.T) {
 		t.Fatalf("unexpected error: %v", execErr)
 	}
 
-	if state.Config.SigningKey != "signkey-test-valid123" {
-		t.Errorf("expected SigningKey %q, got %q", "signkey-test-valid123", state.Config.SigningKey)
+	if state.Config.SigningKey != "signkey-test-aa11dd22" {
+		t.Errorf("expected SigningKey %q, got %q", "signkey-test-aa11dd22", state.Config.SigningKey)
 	}
 }
 
@@ -437,7 +442,7 @@ func TestGetConfigValue_AllKeys(t *testing.T) {
 	cfg := &config.Config{
 		SigningKey:   "signkey-test-123",
 		EventKey:     "evt-key-123",
-		ActiveEnv:    "staging",
+		ActiveEnv:    testStaging,
 		APIBaseURL:   "https://custom.api.com",
 		DevServerURL: "http://localhost:9999",
 	}
@@ -473,18 +478,18 @@ func TestConfigSource_AllKeys(t *testing.T) {
 		DevServerURL: "http://localhost:9999",
 	}
 
-	if got := configSource(cfg, "api_base_url"); got != "config" {
+	if got := configSource(cfg, "api_base_url"); got != testSourceConfig {
 		t.Errorf("expected source 'config' for api_base_url, got %q", got)
 	}
-	if got := configSource(cfg, "dev_server_url"); got != "config" {
+	if got := configSource(cfg, "dev_server_url"); got != testSourceConfig {
 		t.Errorf("expected source 'config' for dev_server_url, got %q", got)
 	}
 
 	cfg2 := &config.Config{}
-	if got := configSource(cfg2, "api_base_url"); got != "default" {
+	if got := configSource(cfg2, "api_base_url"); got != testDefault {
 		t.Errorf("expected source 'default' for empty api_base_url, got %q", got)
 	}
-	if got := configSource(cfg2, "dev_server_url"); got != "default" {
+	if got := configSource(cfg2, "dev_server_url"); got != testDefault {
 		t.Errorf("expected source 'default' for empty dev_server_url, got %q", got)
 	}
 
@@ -498,7 +503,7 @@ func TestConfigSource_AllKeys(t *testing.T) {
 	// event_key default (neither config nor env set)
 	t.Setenv("INNGEST_EVENT_KEY", "")
 	cfg4 := &config.Config{}
-	if got := configSource(cfg4, "event_key"); got != "default" {
+	if got := configSource(cfg4, "event_key"); got != testDefault {
 		t.Errorf("expected source 'default' for empty event_key, got %q", got)
 	}
 }
@@ -517,9 +522,9 @@ func TestConfigCmd_BareHelp(t *testing.T) {
 
 func TestConfigGet_SecretKeyRedacted(t *testing.T) {
 	state.Config = &config.Config{
-		SigningKey: "signkey-test-redactme123",
+		SigningKey: "signkey-test-aabbccdd1234",
 	}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"get", "signing_key"})
@@ -536,10 +541,10 @@ func TestConfigGet_SecretKeyRedacted(t *testing.T) {
 	}
 
 	// Should contain redacted value, not the raw one
-	if strings.Contains(out, "signkey-test-redactme123") {
+	if strings.Contains(out, "signkey-test-aabbccdd1234") {
 		t.Error("output contains unredacted signing key")
 	}
-	if !strings.Contains(out, "sign****e123") {
+	if !strings.Contains(out, "sign****1234") {
 		t.Errorf("expected redacted value in output, got: %s", out)
 	}
 }
@@ -549,7 +554,7 @@ func TestConfigSet_SaveError(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", "/dev/null/impossible/cli.json")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewConfigCmd()
 	cmd.SetArgs([]string{"set", "active_env", "staging"})

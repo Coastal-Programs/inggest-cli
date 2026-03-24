@@ -56,7 +56,7 @@ func printText(data any) error {
 	}
 	switch v.Kind() {
 	case reflect.Slice:
-		for i := 0; i < v.Len(); i++ {
+		for i := range v.Len() {
 			fmt.Println(formatValue(v.Index(i).Interface()))
 		}
 	case reflect.Map:
@@ -65,7 +65,7 @@ func printText(data any) error {
 		}
 	case reflect.Struct:
 		t := v.Type()
-		for i := 0; i < v.NumField(); i++ {
+		for i := range v.NumField() {
 			fmt.Printf("%s: %v\n", t.Field(i).Name, v.Field(i).Interface())
 		}
 	default:
@@ -92,17 +92,17 @@ func printTable(data any) error {
 	}
 	t := elem.Type()
 	headers := make([]string, t.NumField())
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		headers[i] = strings.ToUpper(t.Field(i).Name)
 	}
 	fmt.Fprintln(w, strings.Join(headers, "\t"))
-	for i := 0; i < v.Len(); i++ {
+	for i := range v.Len() {
 		row := v.Index(i)
 		if row.Kind() == reflect.Ptr {
 			row = row.Elem()
 		}
 		cells := make([]string, row.NumField())
-		for j := 0; j < row.NumField(); j++ {
+		for j := range row.NumField() {
 			cells[j] = fmt.Sprintf("%v", row.Field(j).Interface())
 		}
 		fmt.Fprintln(w, strings.Join(cells, "\t"))

@@ -37,7 +37,7 @@ func TestEventsCmdHasSubcommands(t *testing.T) {
 
 func TestEventsSendRequiresEventKey(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = false
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
@@ -58,7 +58,7 @@ func TestEventsSendRequiresEventKey(t *testing.T) {
 
 func TestEventsSendNoArgError(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"send"})
@@ -74,7 +74,7 @@ func TestEventsSendNoArgError(t *testing.T) {
 
 func TestEventsGetNoArgError(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"get"})
@@ -90,7 +90,7 @@ func TestEventsGetNoArgError(t *testing.T) {
 
 func TestEventsListInvalidSince(t *testing.T) {
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"list", "--since", "notaduration"})
@@ -114,7 +114,7 @@ func TestNewCloudClient(t *testing.T) {
 	}
 	state.Env = "production"
 	state.APIBaseURL = "https://api.inngest.com"
-	state.DevServer = "http://localhost:8288"
+	state.DevServer = testDevServerURL
 	state.DevMode = false
 	state.AppVersion = "v1.0.0"
 
@@ -138,11 +138,11 @@ func TestEventsSend_Success(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
 	state.DevServer = srv.URL
 	state.APIBaseURL = srv.URL
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"send", "test/event", "--data", `{"key":"val"}`})
@@ -175,11 +175,11 @@ func TestEventsSend_Stdin(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
 	state.DevServer = srv.URL
 	state.APIBaseURL = srv.URL
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	// Feed JSON via stdin pipe.
 	oldStdin := os.Stdin
@@ -212,11 +212,11 @@ func TestEventsSend_StdinInvalidJSON(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
-	state.DevServer = "http://localhost:8288"
-	state.APIBaseURL = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.DevServer = testDevServerURL
+	state.APIBaseURL = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	// Feed invalid JSON via stdin pipe.
 	oldStdin := os.Stdin
@@ -256,11 +256,11 @@ func TestEventsSend_StdinEmpty(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
 	state.DevServer = srv.URL
 	state.APIBaseURL = srv.URL
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	// Feed empty stdin.
 	oldStdin := os.Stdin
@@ -305,11 +305,11 @@ func TestEventsSend_InvalidData(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
-	state.DevServer = "http://localhost:8288"
-	state.APIBaseURL = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.DevServer = testDevServerURL
+	state.APIBaseURL = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"send", "test/event", "--data", "not-json"})
@@ -337,12 +337,12 @@ func TestEventsGet_GraphQLSuccess(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"get", "evt-1"})
@@ -379,12 +379,12 @@ func TestEventsGet_FallbackToREST(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"get", "evt-1"})
@@ -415,12 +415,12 @@ func TestEventsGet_BothFail(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"get", "evt-1"})
@@ -445,12 +445,12 @@ func TestEventsList_Success(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"list"})
@@ -483,12 +483,12 @@ func TestEventsTypes_Success(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"types"})
@@ -521,11 +521,11 @@ func TestEventsSend_StdinReadError(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
-	state.DevServer = "http://localhost:8288"
-	state.APIBaseURL = "http://localhost:8288"
-	state.AppVersion = "test"
+	state.DevServer = testDevServerURL
+	state.APIBaseURL = testDevServerURL
+	state.AppVersion = testAppVersion
 
 	oldStdin := os.Stdin
 	r, _, _ := os.Pipe()
@@ -560,11 +560,11 @@ func TestEventsSend_SendError(t *testing.T) {
 	t.Setenv("INNGEST_SIGNING_KEY", "")
 
 	state.Config = &config.Config{EventKey: "test-key"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.DevMode = true
 	state.DevServer = srv.URL
 	state.APIBaseURL = srv.URL
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"send", "test/event", "--data", `{"key":"val"}`})
@@ -591,12 +591,12 @@ func TestEventsList_Error(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"list"})
@@ -615,7 +615,7 @@ func TestEventsList_Error(t *testing.T) {
 
 func TestEventsTypes_InvalidSince(t *testing.T) {
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"types", "--since", "notaduration"})
@@ -642,12 +642,12 @@ func TestEventsTypes_ListError(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"types"})

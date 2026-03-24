@@ -16,7 +16,7 @@ help:
 ## build: Build binary to ./build/inngest
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) $(CMD)
+	go build -trimpath $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) $(CMD)
 
 ## install: Install binary to GOPATH/bin
 install:
@@ -49,7 +49,7 @@ vet:
 
 ## lint: Run golangci-lint (installs if missing)
 lint:
-	@which golangci-lint > /dev/null 2>&1 || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@which golangci-lint > /dev/null 2>&1 || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
 	golangci-lint run ./...
 
 ## check: Run fmt, vet, and lint (pre-commit gate)

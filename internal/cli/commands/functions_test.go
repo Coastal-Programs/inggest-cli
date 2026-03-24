@@ -11,6 +11,11 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
+const (
+	testProcessPayment = "Process Payment"
+	testSlug           = "test"
+)
+
 func TestFunctionsCmdHasSubcommands(t *testing.T) {
 	cmd := NewFunctionsCmd()
 
@@ -128,7 +133,7 @@ func TestPrintFunctionDetailMinimal(t *testing.T) {
 
 func TestBuildConfigOutput(t *testing.T) {
 	fn := &inngest.Function{
-		Slug:   "test",
+		Slug:   testSlug,
 		Name:   "Test",
 		Config: `{"retries":3}`,
 		Configuration: &inngest.FunctionConfiguration{
@@ -144,8 +149,8 @@ func TestBuildConfigOutput(t *testing.T) {
 		}
 	}
 
-	if result["slug"] != "test" {
-		t.Errorf("expected slug %q, got %v", "test", result["slug"])
+	if result["slug"] != testSlug {
+		t.Errorf("expected slug %q, got %v", testSlug, result["slug"])
 	}
 	if result["name"] != "Test" {
 		t.Errorf("expected name %q, got %v", "Test", result["name"])
@@ -197,7 +202,7 @@ func setupFunctionsTestState(t *testing.T, srvURL string) {
 	state.DevServer = srvURL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 }
 
 func TestFunctionsList_Success(t *testing.T) {
@@ -228,8 +233,8 @@ func TestFunctionsList_Success(t *testing.T) {
 	if len(functions) != 2 {
 		t.Fatalf("expected 2 functions, got %d", len(functions))
 	}
-	if functions[0].Name != "Process Payment" {
-		t.Errorf("expected first function name %q, got %q", "Process Payment", functions[0].Name)
+	if functions[0].Name != testProcessPayment {
+		t.Errorf("expected first function name %q, got %q", testProcessPayment, functions[0].Name)
 	}
 	if functions[1].Name != "Send Email" {
 		t.Errorf("expected second function name %q, got %q", "Send Email", functions[1].Name)
@@ -308,7 +313,7 @@ func TestFunctionsList_Table(t *testing.T) {
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
-	state.Output = "table"
+	state.Output = testOutputTable
 
 	cmd := NewFunctionsCmd()
 	cmd.SetArgs([]string{"list"})
@@ -355,8 +360,8 @@ func TestFunctionsGet_Success(t *testing.T) {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if fn.Name != "Process Payment" {
-		t.Errorf("expected function name %q, got %q", "Process Payment", fn.Name)
+	if fn.Name != testProcessPayment {
+		t.Errorf("expected function name %q, got %q", testProcessPayment, fn.Name)
 	}
 	if fn.Slug != "process-payment" {
 		t.Errorf("expected function slug %q, got %q", "process-payment", fn.Slug)
@@ -386,7 +391,7 @@ func TestFunctionsConfig_JSON(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -400,8 +405,8 @@ func TestFunctionsConfig_JSON(t *testing.T) {
 	if result["slug"] != "process-payment" {
 		t.Errorf("expected slug %q, got %v", "process-payment", result["slug"])
 	}
-	if result["name"] != "Process Payment" {
-		t.Errorf("expected name %q, got %v", "Process Payment", result["name"])
+	if result["name"] != testProcessPayment {
+		t.Errorf("expected name %q, got %v", testProcessPayment, result["name"])
 	}
 }
 
@@ -412,7 +417,7 @@ func TestFunctionsConfig_Text(t *testing.T) {
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
-	state.Output = "text"
+	state.Output = testOutputText
 
 	cmd := NewFunctionsCmd()
 	cmd.SetArgs([]string{"config", "process-payment"})
@@ -449,7 +454,7 @@ func TestFunctionsCmd_BareHelp(t *testing.T) {
 
 func TestBuildConfigOutput_InvalidJSON(t *testing.T) {
 	fn := &inngest.Function{
-		Slug:   "test",
+		Slug:   testSlug,
 		Name:   "Test",
 		Config: `not-json`,
 	}
@@ -469,7 +474,7 @@ func TestFunctionsGet_TextOutput(t *testing.T) {
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
-	state.Output = "text"
+	state.Output = testOutputText
 
 	cmd := NewFunctionsCmd()
 	cmd.SetArgs([]string{"get", "process-payment"})
@@ -585,7 +590,7 @@ func TestFunctionsConfig_TextInvalidRawConfig(t *testing.T) {
 	}, nil)
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
-	state.Output = "text"
+	state.Output = testOutputText
 
 	cmd := NewFunctionsCmd()
 	cmd.SetArgs([]string{"config", "test-fn"})

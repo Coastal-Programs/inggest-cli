@@ -8,10 +8,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 // NewEventsCmd returns the "events" command group for cloud events.
@@ -68,7 +69,7 @@ func newEventsSendCmd() *cobra.Command {
 			}
 
 			// Parse event data from --data flag or stdin.
-			var eventData interface{}
+			var eventData any
 			switch {
 			case data != "":
 				if err := json.Unmarshal([]byte(data), &eventData); err != nil {
@@ -87,10 +88,10 @@ func newEventsSendCmd() *cobra.Command {
 			}
 
 			if eventData == nil {
-				eventData = map[string]interface{}{}
+				eventData = map[string]any{}
 			}
 
-			event := map[string]interface{}{
+			event := map[string]any{
 				"name": eventName,
 				"data": eventData,
 				"ts":   time.Now().UnixMilli(),
@@ -101,7 +102,7 @@ func newEventsSendCmd() *cobra.Command {
 				return fmt.Errorf("sending event: %w", err)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"event_name": eventName,
 				"event_ids":  ids,
 				"async":      async,
@@ -137,10 +138,10 @@ func newEventsGetCmd() *cobra.Command {
 			// Fall back to REST for just the runs.
 			runs, restErr := client.GetEventRuns(ctx, eventID)
 			if restErr != nil {
-				return fmt.Errorf("getting event: graphql: %v, rest: %w", err, restErr)
+				return fmt.Errorf("getting event: graphql: %w, rest: %w", err, restErr)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"event_id": eventID,
 				"runs":     runs,
 			}, format)
@@ -182,7 +183,7 @@ func newEventsListCmd() *cobra.Command {
 				events[i] = edge.Node
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"events":     events,
 				"totalCount": conn.TotalCount,
 			}, format)

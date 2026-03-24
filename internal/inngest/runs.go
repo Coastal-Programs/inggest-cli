@@ -56,7 +56,7 @@ func (c *Client) ListRuns(ctx context.Context, opts ListRunsOptions) (*RunsConne
 		first = 20
 	}
 
-	filter := map[string]interface{}{}
+	filter := map[string]any{}
 	if !opts.From.IsZero() {
 		filter["from"] = opts.From.Format(time.RFC3339)
 	}
@@ -76,7 +76,7 @@ func (c *Client) ListRuns(ctx context.Context, opts ListRunsOptions) (*RunsConne
 		filter["query"] = opts.Query
 	}
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"first":   first,
 		"orderBy": []map[string]string{{"field": "QUEUED_AT", "direction": "DESC"}},
 		"filter":  filter,
@@ -162,7 +162,7 @@ func (c *Client) GetRun(ctx context.Context, runID string) (*FunctionRun, error)
   }
 }`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"runID": runID,
 	}
 
@@ -223,7 +223,7 @@ func (c *Client) CancelRun(ctx context.Context, runID string) (*FunctionRun, err
   }
 }`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"runID": runID,
 	}
 
@@ -254,7 +254,7 @@ func (c *Client) RerunRun(ctx context.Context, runID string) (string, error) {
   rerun(runID: $runID)
 }`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"runID": runID,
 	}
 

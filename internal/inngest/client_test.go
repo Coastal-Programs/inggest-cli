@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const testSigningKey = "signkey-test-abc123def456"
+
 // ---------------------------------------------------------------------------
 // TestNewClient
 // ---------------------------------------------------------------------------
@@ -742,7 +744,10 @@ func TestDoReadBodyError(t *testing.T) {
 	}
 	req.Body = io.NopCloser(errReader{})
 
-	_, err = c.do(req)
+	resp, err := c.do(req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -796,7 +801,10 @@ func TestDoFallbackRetryError(t *testing.T) {
 		return nil, fmt.Errorf("connection refused")
 	})
 
-	_, err = c.do(req)
+	resp, err := c.do(req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	srv.Close()
 
 	if err == nil {
@@ -831,7 +839,10 @@ func TestDoWithRetry_TransportError(t *testing.T) {
 		t.Fatalf("NewRequest: %v", err)
 	}
 
-	_, err = c.do(req)
+	resp, err := c.do(req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1053,7 +1064,7 @@ func TestHashSigningKey(t *testing.T) {
 	// normalizeKey strips "signkey-test-" prefix, then hex-decode + SHA-256 + hex-encode.
 	t.Run("cloud key with prefix", func(t *testing.T) {
 		// "abc123def456" hex-decoded = 6 bytes, SHA-256 of those bytes
-		key := "signkey-test-abc123def456"
+		key := testSigningKey
 		got, err := HashSigningKey(key)
 		if err != nil {
 			t.Fatalf("HashSigningKey(%q) error: %v", key, err)
@@ -1076,7 +1087,7 @@ func TestHashSigningKey(t *testing.T) {
 			t.Fatalf("HashSigningKey(%q) error: %v", key, err)
 		}
 		// Should produce same hash as test prefix since the hex payload is the same
-		key2 := "signkey-test-abc123def456"
+		key2 := testSigningKey
 		got2, _ := HashSigningKey(key2)
 		if got != got2 {
 			t.Errorf("same hex payload with different prefixes should hash the same: %q != %q", got, got2)
@@ -1112,7 +1123,7 @@ func TestHashSigningKey(t *testing.T) {
 		// Verify against the Go server's HashedSigningKey from
 		// inngest/inngest pkg/authn/signing_key_strategy.go:
 		// HashedSigningKey("abc123def456") should produce the same result.
-		key := "signkey-test-abc123def456"
+		key := testSigningKey
 		got, err := HashSigningKey(key)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -1129,4 +1140,82 @@ func TestHashSigningKey(t *testing.T) {
 
 func sha256Sum(data []byte) [32]byte {
 	return sha256.Sum256(data)
+}
+
+// ---------------------------------------------------------------------------
+// TestDoHashedSigningKey — covers the success branch of HashSigningKey in do()
+// ---------------------------------------------------------------------------
+
+func TestDoHashedSigningKey(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Use a valid signkey- prefixed key with valid hex after the prefix.
+	c := NewClient(ClientOptions{
+		SigningKey: "signkey-test-abcdef0123456789abcdef0123456789",
+	})
+	c.httpClient = srv.Client()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/test", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp, err := c.do(req)
+	if err != nil {
+		t.Fatalf("do() error: %v", err)
+	}
+	resp.Body.Close()
+
+	// The key should be hashed, not sent raw.
+	if gotAuth == "Bearer signkey-test-abcdef0123456789abcdef0123456789" {
+		t.Error("Authorization should be hashed, not raw")
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Errorf("Authorization = %q, want Bearer prefix", gotAuth)
+	}
+}
+
+func TestDoHashedFallbackKey(t *testing.T) {
+	var calls int64
+	var lastAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt64(&calls, 1)
+		lastAuth = r.Header.Get("Authorization")
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(ClientOptions{
+		SigningKey:         "signkey-test-abcdef0123456789abcdef0123456789",
+		SigningKeyFallback: "signkey-prod-1234567890abcdef1234567890abcdef",
+	})
+	c.httpClient = srv.Client()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/test", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp, err := c.do(req)
+	if err != nil {
+		t.Fatalf("do() error: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	// Fallback key should also be hashed.
+	if lastAuth == "Bearer signkey-prod-1234567890abcdef1234567890abcdef" {
+		t.Error("Fallback authorization should be hashed, not raw")
+	}
 }

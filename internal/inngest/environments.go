@@ -67,7 +67,7 @@ func (c *Client) ListApps(ctx context.Context) ([]App, error) {
 
 // GetApp gets a single app by ID.
 func (c *Client) GetApp(ctx context.Context, appID string) (*App, error) {
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"id": appID,
 	}
 	var result struct {

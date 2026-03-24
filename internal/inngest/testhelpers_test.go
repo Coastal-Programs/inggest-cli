@@ -33,14 +33,6 @@ func (t *errBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, nil
 }
 
-// graphqlBody is the request payload POSTed by ExecuteGraphQL, used for
-// capturing and asserting the request in tests.
-type graphqlBody struct {
-	OperationName string                 `json:"operationName,omitempty"`
-	Query         string                 `json:"query"`
-	Variables     map[string]interface{} `json:"variables,omitempty"`
-}
-
 // newTestServer creates an httptest.Server that handles POST /gql (cloud) and
 // returns the given JSON response body. It verifies method, path, content-type
 // and authorization headers. If captured is non-nil the decoded request body is

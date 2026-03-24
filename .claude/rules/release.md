@@ -70,5 +70,3 @@ This release adds budget reporting commands and improves error messages across a
 GitHub Actions extracts the CHANGELOG entry and uses it as the release description, then builds 5 platform binaries automatically.
 
 > Never push a tag without a well-written CHANGELOG entry first.
-ry first.
-try first.

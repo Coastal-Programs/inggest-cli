@@ -88,7 +88,7 @@ func (c *Client) ListFunctions(ctx context.Context) ([]Function, error) {
 
 // GetFunction gets a function by slug via GraphQL.
 func (c *Client) GetFunction(ctx context.Context, slug string) (*Function, error) {
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"slug": slug,
 	}
 	var result struct {

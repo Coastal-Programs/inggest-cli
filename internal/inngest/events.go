@@ -19,7 +19,7 @@ type ListEventsOptions struct {
 
 // SendEvent sends an event via the Event API (POST https://inn.gs/e/{eventKey}).
 // Returns the event IDs.
-func (c *Client) SendEvent(ctx context.Context, event interface{}) ([]string, error) {
+func (c *Client) SendEvent(ctx context.Context, event any) ([]string, error) {
 	if c.eventKey == "" {
 		return nil, fmt.Errorf("inngest: event key is required to send events")
 	}
@@ -47,7 +47,7 @@ func (c *Client) SendEvent(ctx context.Context, event interface{}) ([]string, er
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("inngest: send event returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("inngest: send event returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
 	}
 
 	var result struct {
@@ -122,7 +122,7 @@ func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*Event
   }
 }`
 
-	filter := map[string]interface{}{}
+	filter := map[string]any{}
 	if !opts.Since.IsZero() {
 		filter["from"] = opts.Since.Format(time.RFC3339)
 	}
@@ -135,7 +135,7 @@ func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*Event
 		first = 20
 	}
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"first":  first,
 		"filter": filter,
 	}
@@ -210,7 +210,7 @@ func (c *Client) GetEvent(ctx context.Context, eventID string) (*Event, error) {
   }
 }`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"eventId": eventID,
 	}
 

@@ -8,13 +8,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
+
+const sourceConfigEnvAlsoSet = "config (env var also set)"
 
 // NewAuthCmd returns the "auth" command group.
 func NewAuthCmd() *cobra.Command {
@@ -32,6 +35,29 @@ func NewAuthCmd() *cobra.Command {
 	return cmd
 }
 
+// resolveSigningKey resolves the signing key from flag, env var, or interactive prompt.
+func resolveSigningKey(flagValue string) (string, error) {
+	key := flagValue
+	if key == "" {
+		key = os.Getenv("INNGEST_SIGNING_KEY")
+	}
+	if key == "" {
+		if !isInteractive() {
+			return "", fmt.Errorf("signing key required: use --signing-key flag or INNGEST_SIGNING_KEY env var")
+		}
+		var err error
+		key, err = readSecret("Enter signing key: ")
+		if err != nil {
+			return "", err
+		}
+	}
+	key = strings.TrimSpace(key)
+	if err := validateSigningKey(key); err != nil {
+		return "", fmt.Errorf("invalid signing key: %w", err)
+	}
+	return key, nil
+}
+
 func newAuthLoginCmd() *cobra.Command {
 	var signingKey string
 	var signingKeyFallback string
@@ -45,24 +71,10 @@ func newAuthLoginCmd() *cobra.Command {
 			cfg := state.Config
 			format := output.Format(state.Output)
 
-			// Resolve signing key: flag > env > prompt
-			if signingKey == "" {
-				signingKey = os.Getenv("INNGEST_SIGNING_KEY")
-			}
-			if signingKey == "" {
-				if !isInteractive() {
-					return fmt.Errorf("signing key required: use --signing-key flag or INNGEST_SIGNING_KEY env var")
-				}
-				var err error
-				signingKey, err = readSecret("Enter signing key: ")
-				if err != nil {
-					return err
-				}
-			}
-
-			signingKey = strings.TrimSpace(signingKey)
-			if err := validateSigningKey(signingKey); err != nil {
-				return fmt.Errorf("invalid signing key: %w", err)
+			var err error
+			signingKey, err = resolveSigningKey(signingKey)
+			if err != nil {
+				return err
 			}
 
 			// Resolve event key: flag > env > prompt
@@ -141,6 +153,51 @@ func newAuthLogoutCmd() *cobra.Command {
 	}
 }
 
+// populateKeyStatus adds key info and source to the result map.
+func populateKeyStatus(result map[string]any, keyName, keyValue, envVarValue, configValue, envVarLabel string) {
+	if keyValue != "" {
+		result[keyName] = config.Redact(keyValue)
+		switch {
+		case envVarValue != "" && configValue != "":
+			result[keyName+"_source"] = sourceConfigEnvAlsoSet
+		case envVarValue != "":
+			result[keyName+"_source"] = "env (" + envVarLabel + ")"
+		default:
+			result[keyName+"_source"] = sourceConfig
+		}
+	} else {
+		result[keyName] = "not configured"
+	}
+}
+
+// validateAPIConnection checks if the signing key is valid by querying the API.
+func validateAPIConnection(result map[string]any, signingKey, signingKeyFallback string) {
+	client := inngest.NewClient(inngest.ClientOptions{
+		SigningKey:         signingKey,
+		SigningKeyFallback: signingKeyFallback,
+		Env:                state.Env,
+		APIBaseURL:         state.APIBaseURL,
+		DevServerURL:       state.DevServer,
+		DevMode:            state.DevMode,
+		UserAgent:          "inngest-cli/" + state.AppVersion,
+	})
+
+	var data any
+	err := client.ExecuteGraphQL(
+		context.Background(),
+		"AuthCheck",
+		`query AuthCheck { __typename }`,
+		nil,
+		&data,
+	)
+	if err != nil {
+		result["api_validation"] = "failed"
+		result["api_validation_error"] = err.Error()
+	} else {
+		result["api_validation"] = "ok"
+	}
+}
+
 func newAuthStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
@@ -154,86 +211,24 @@ func newAuthStatusCmd() *cobra.Command {
 			signingKeyFallback := cfg.GetSigningKeyFallback()
 			eventKey := cfg.GetEventKey()
 
-			result := map[string]interface{}{
+			result := map[string]any{
 				"authenticated":  signingKey != "",
 				"environment":    state.Env,
 				"api_base_url":   state.APIBaseURL,
 				"dev_server_url": state.DevServer,
 			}
 
-			// Signing key status
-			if signingKey != "" {
-				result["signing_key"] = config.Redact(signingKey)
-				if os.Getenv("INNGEST_SIGNING_KEY") != "" && cfg.SigningKey != "" {
-					result["signing_key_source"] = "config (env var also set)"
-				} else if os.Getenv("INNGEST_SIGNING_KEY") != "" {
-					result["signing_key_source"] = "env (INNGEST_SIGNING_KEY)"
-				} else {
-					result["signing_key_source"] = "config"
-				}
-			} else {
-				result["signing_key"] = "not configured"
-			}
-
-			// Signing key fallback status
-			if signingKeyFallback != "" {
-				result["signing_key_fallback"] = config.Redact(signingKeyFallback)
-				if os.Getenv("INNGEST_SIGNING_KEY_FALLBACK") != "" && cfg.SigningKeyFallback != "" {
-					result["signing_key_fallback_source"] = "config (env var also set)"
-				} else if os.Getenv("INNGEST_SIGNING_KEY_FALLBACK") != "" {
-					result["signing_key_fallback_source"] = "env (INNGEST_SIGNING_KEY_FALLBACK)"
-				} else {
-					result["signing_key_fallback_source"] = "config"
-				}
-			} else {
-				result["signing_key_fallback"] = "not configured"
-			}
-
-			// Event key status
-			if eventKey != "" {
-				result["event_key"] = config.Redact(eventKey)
-				if os.Getenv("INNGEST_EVENT_KEY") != "" && cfg.EventKey != "" {
-					result["event_key_source"] = "config (env var also set)"
-				} else if os.Getenv("INNGEST_EVENT_KEY") != "" {
-					result["event_key_source"] = "env (INNGEST_EVENT_KEY)"
-				} else {
-					result["event_key_source"] = "config"
-				}
-			} else {
-				result["event_key"] = "not configured"
-			}
+			populateKeyStatus(result, "signing_key", signingKey, os.Getenv("INNGEST_SIGNING_KEY"), cfg.SigningKey, "INNGEST_SIGNING_KEY")
+			populateKeyStatus(result, "signing_key_fallback", signingKeyFallback, os.Getenv("INNGEST_SIGNING_KEY_FALLBACK"), cfg.SigningKeyFallback, "INNGEST_SIGNING_KEY_FALLBACK")
+			populateKeyStatus(result, "event_key", eventKey, os.Getenv("INNGEST_EVENT_KEY"), cfg.EventKey, "INNGEST_EVENT_KEY")
 
 			// Custom API URL indicator
 			if cfg.APIBaseURL != "" {
 				result["custom_api_url"] = true
 			}
 
-			// Validate signing key by querying the API
 			if signingKey != "" {
-				client := inngest.NewClient(inngest.ClientOptions{
-					SigningKey:         signingKey,
-					SigningKeyFallback: signingKeyFallback,
-					Env:                state.Env,
-					APIBaseURL:         state.APIBaseURL,
-					DevServerURL:       state.DevServer,
-					DevMode:            state.DevMode,
-					UserAgent:          "inngest-cli/" + state.AppVersion,
-				})
-
-				var data interface{}
-				err := client.ExecuteGraphQL(
-					context.Background(),
-					"AuthCheck",
-					`query AuthCheck { __typename }`,
-					nil,
-					&data,
-				)
-				if err != nil {
-					result["api_validation"] = "failed"
-					result["api_validation_error"] = err.Error()
-				} else {
-					result["api_validation"] = "ok"
-				}
+				validateAPIConnection(result, signingKey, signingKeyFallback)
 			}
 
 			return output.Print(result, format)
@@ -244,7 +239,7 @@ func newAuthStatusCmd() *cobra.Command {
 // isInteractiveFn is the function used to check if stdin is a terminal.
 // Overridden in tests to simulate interactive/non-interactive modes.
 var isInteractiveFn = func() bool {
-	return term.IsTerminal(int(syscall.Stdin))
+	return term.IsTerminal(syscall.Stdin)
 }
 
 // isInteractive returns true if stdin is a terminal.
@@ -253,9 +248,7 @@ func isInteractive() bool {
 }
 
 // termReadPasswordFn wraps term.ReadPassword for test injection.
-var termReadPasswordFn = func(fd int) ([]byte, error) {
-	return term.ReadPassword(fd)
-}
+var termReadPasswordFn = term.ReadPassword
 
 // readSecretFn is the function used to read a secret from the terminal.
 // Overridden in tests to avoid requiring a real terminal.
@@ -263,7 +256,7 @@ var readSecretFn = defaultReadSecret
 
 func defaultReadSecret(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
-	bytes, err := termReadPasswordFn(int(syscall.Stdin))
+	bytes, err := termReadPasswordFn(syscall.Stdin)
 	fmt.Fprintln(os.Stderr) // newline after hidden input
 	if err != nil {
 		return "", fmt.Errorf("failed to read input: %w", err)
@@ -287,7 +280,18 @@ func validateSigningKey(key string) error {
 
 	// Cloud format: signkey-{env}-{hex}
 	if strings.HasPrefix(key, "signkey-") {
-		return nil // Cloud keys are validated server-side
+		// Strip the signkey-{env}- prefix and validate the hex portion
+		parts := strings.SplitN(key, "-", 3)
+		if len(parts) < 3 || parts[2] == "" {
+			return fmt.Errorf("signing key must have format signkey-{env}-{hex}")
+		}
+		if len(parts[2])%2 != 0 {
+			return fmt.Errorf("signing key hex portion must have even length")
+		}
+		if _, err := hex.DecodeString(parts[2]); err != nil {
+			return fmt.Errorf("signing key hex portion is not valid hex: %w", err)
+		}
+		return nil
 	}
 
 	// Self-hosted format: raw hex string

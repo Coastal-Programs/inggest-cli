@@ -11,10 +11,10 @@ import (
 
 // DevServerInfo is the response from GET /dev.
 type DevServerInfo struct {
-	Version      string      `json:"version"`
-	StartOpts    interface{} `json:"startOpts,omitempty"`
-	Functions    []Function  `json:"functions"`
-	EventKeyHash string      `json:"eventKeyHash,omitempty"`
+	Version      string     `json:"version"`
+	StartOpts    any        `json:"startOpts,omitempty"`
+	Functions    []Function `json:"functions"`
+	EventKeyHash string     `json:"eventKeyHash,omitempty"`
 }
 
 // GetDevInfo fetches dev server info (GET /dev).
@@ -37,7 +37,7 @@ func (c *Client) GetDevInfo(ctx context.Context) (*DevServerInfo, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("inngest: dev info returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("inngest: dev info returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
 	}
 
 	var info DevServerInfo
@@ -59,13 +59,13 @@ func (c *Client) IsDevServerRunning(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
 }
 
 // SendDevEvent sends an event to the dev server (POST /e/{key}).
 // Returns the list of event IDs created.
-func (c *Client) SendDevEvent(ctx context.Context, eventData interface{}) ([]string, error) {
+func (c *Client) SendDevEvent(ctx context.Context, eventData any) ([]string, error) {
 	body, err := json.Marshal(eventData)
 	if err != nil {
 		return nil, fmt.Errorf("inngest: marshal event data: %w", err)
@@ -95,7 +95,7 @@ func (c *Client) SendDevEvent(ctx context.Context, eventData interface{}) ([]str
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("inngest: send event returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("inngest: send event returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
 	}
 
 	var result struct {
@@ -111,7 +111,7 @@ func (c *Client) SendDevEvent(ctx context.Context, eventData interface{}) ([]str
 
 // InvokeDevFunction invokes a function on the dev server (POST /invoke/{slug}).
 // Returns the run ID.
-func (c *Client) InvokeDevFunction(ctx context.Context, slug string, data interface{}) (string, error) {
+func (c *Client) InvokeDevFunction(ctx context.Context, slug string, data any) (string, error) {
 	body, err := json.Marshal(data)
 	if err != nil {
 		return "", fmt.Errorf("inngest: marshal invoke data: %w", err)
@@ -135,7 +135,7 @@ func (c *Client) InvokeDevFunction(ctx context.Context, slug string, data interf
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("inngest: invoke returned status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("inngest: invoke returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
 	}
 
 	var result struct {

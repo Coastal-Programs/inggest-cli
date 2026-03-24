@@ -3,46 +3,56 @@ package commands
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
+)
+
+const (
+	configKeyEventKey     = "event_key"
+	configKeyActiveEnv    = "active_env"
+	configKeyAPIBaseURL   = "api_base_url"
+	configKeyDevServerURL = "dev_server_url"
+	configKeySigningKey   = "signing_key"
+
+	sourceConfig        = "config"
+	sourceDefault       = "default"
+	sourceEnvSigningKey = "env (INNGEST_SIGNING_KEY)"
+	sourceEnvEventKey   = "env (INNGEST_EVENT_KEY)"
 )
 
 var validConfigKeys = []string{
-	"signing_key",
-	"event_key",
-	"active_env",
-	"api_base_url",
-	"dev_server_url",
+	configKeySigningKey,
+	configKeyEventKey,
+	configKeyActiveEnv,
+	configKeyAPIBaseURL,
+	configKeyDevServerURL,
 }
 
 func isValidKey(key string) bool {
-	for _, k := range validConfigKeys {
-		if k == key {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(validConfigKeys, key)
 }
 
 func isSecretKey(key string) bool {
-	return key == "signing_key" || key == "event_key"
+	return key == configKeySigningKey || key == configKeyEventKey
 }
 
 func getConfigValue(cfg *config.Config, key string) string {
 	switch key {
-	case "signing_key":
+	case configKeySigningKey:
 		return cfg.GetSigningKey()
-	case "event_key":
+	case configKeyEventKey:
 		return cfg.GetEventKey()
-	case "active_env":
+	case configKeyActiveEnv:
 		return cfg.GetActiveEnv()
-	case "api_base_url":
+	case configKeyAPIBaseURL:
 		return cfg.GetAPIBaseURL()
-	case "dev_server_url":
+	case configKeyDevServerURL:
 		return cfg.GetDevServerURL()
 	default:
 		return ""
@@ -51,37 +61,37 @@ func getConfigValue(cfg *config.Config, key string) string {
 
 func configSource(cfg *config.Config, key string) string {
 	switch key {
-	case "signing_key":
+	case configKeySigningKey:
 		if cfg.SigningKey != "" {
-			return "config"
+			return sourceConfig
 		}
 		if os.Getenv("INNGEST_SIGNING_KEY") != "" {
-			return "env (INNGEST_SIGNING_KEY)"
+			return sourceEnvSigningKey
 		}
-		return "default"
-	case "event_key":
+		return sourceDefault
+	case configKeyEventKey:
 		if cfg.EventKey != "" {
-			return "config"
+			return sourceConfig
 		}
 		if os.Getenv("INNGEST_EVENT_KEY") != "" {
-			return "env (INNGEST_EVENT_KEY)"
+			return sourceEnvEventKey
 		}
-		return "default"
-	case "active_env":
+		return sourceDefault
+	case configKeyActiveEnv:
 		if cfg.ActiveEnv != "" {
-			return "config"
+			return sourceConfig
 		}
-		return "default"
-	case "api_base_url":
+		return sourceDefault
+	case configKeyAPIBaseURL:
 		if cfg.APIBaseURL != "" {
-			return "config"
+			return sourceConfig
 		}
-		return "default"
-	case "dev_server_url":
+		return sourceDefault
+	case configKeyDevServerURL:
 		if cfg.DevServerURL != "" {
-			return "config"
+			return sourceConfig
 		}
-		return "default"
+		return sourceDefault
 	default:
 		return "unknown"
 	}
@@ -117,7 +127,7 @@ func newConfigShowCmd() *cobra.Command {
 				Source string `json:"source"`
 			}
 
-			var entries []configEntry
+			entries := make([]configEntry, 0, len(validConfigKeys))
 			for _, key := range validConfigKeys {
 				val := getConfigValue(cfg, key)
 				if isSecretKey(key) && val != "" {
@@ -174,7 +184,7 @@ func newConfigSetCmd() *cobra.Command {
 			}
 
 			// Validate signing key format
-			if key == "signing_key" {
+			if key == configKeySigningKey {
 				if err := validateSigningKey(value); err != nil {
 					return fmt.Errorf("invalid signing key format: %w", err)
 				}
@@ -182,15 +192,15 @@ func newConfigSetCmd() *cobra.Command {
 
 			cfg := state.Config
 			switch key {
-			case "signing_key":
+			case configKeySigningKey:
 				cfg.SigningKey = value
-			case "event_key":
+			case configKeyEventKey:
 				cfg.EventKey = value
-			case "active_env":
+			case configKeyActiveEnv:
 				cfg.ActiveEnv = value
-			case "api_base_url":
+			case configKeyAPIBaseURL:
 				cfg.APIBaseURL = value
-			case "dev_server_url":
+			case configKeyDevServerURL:
 				cfg.DevServerURL = value
 			}
 

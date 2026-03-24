@@ -9,7 +9,7 @@ import (
 )
 
 // GetREST performs a GET request to the REST v1 API and unmarshals the response.
-func (c *Client) GetREST(ctx context.Context, path string, result interface{}) error {
+func (c *Client) GetREST(ctx context.Context, path string, result any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.restURL(path), nil)
 	if err != nil {
 		return fmt.Errorf("inngest: create GET request: %w", err)
@@ -28,7 +28,7 @@ func (c *Client) GetREST(ctx context.Context, path string, result interface{}) e
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("inngest: GET %s returned status %d: %s", path, resp.StatusCode, string(respBody))
+		return fmt.Errorf("inngest: GET %s returned status %d: %s", path, resp.StatusCode, truncateBody(string(respBody)))
 	}
 
 	if result != nil {

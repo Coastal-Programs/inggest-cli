@@ -3,9 +3,10 @@ package commands
 import (
 	"runtime"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 // NewVersionCmd returns the "version" command.

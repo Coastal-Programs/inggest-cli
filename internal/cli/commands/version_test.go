@@ -11,6 +11,8 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 )
 
+const testVersion = "v1.2.3"
+
 // captureStdout redirects os.Stdout to a pipe, runs fn, then returns what was written.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
@@ -35,7 +37,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestVersionCmdOutput(t *testing.T) {
-	state.AppVersion = "v1.2.3"
+	state.AppVersion = testVersion
 	state.Output = "json"
 
 	cmd := NewVersionCmd()
@@ -54,8 +56,8 @@ func TestVersionCmdOutput(t *testing.T) {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["version"]; !ok || v != "v1.2.3" {
-		t.Errorf("expected version %q, got %q", "v1.2.3", v)
+	if v, ok := result["version"]; !ok || v != testVersion {
+		t.Errorf("expected version %q, got %q", testVersion, v)
 	}
 	if v, ok := result["os"]; !ok || v != runtime.GOOS {
 		t.Errorf("expected os %q, got %q", runtime.GOOS, v)
@@ -66,7 +68,7 @@ func TestVersionCmdOutput(t *testing.T) {
 }
 
 func TestVersionCmdTextOutput(t *testing.T) {
-	state.AppVersion = "v1.2.3"
+	state.AppVersion = testVersion
 	state.Output = "text"
 
 	cmd := NewVersionCmd()
@@ -80,7 +82,7 @@ func TestVersionCmdTextOutput(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "v1.2.3") {
-		t.Errorf("expected output to contain %q, got: %s", "v1.2.3", got)
+	if !strings.Contains(got, testVersion) {
+		t.Errorf("expected output to contain %q, got: %s", testVersion, got)
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
+const testRunID1 = "run-1"
+
 func TestRunsCmdHasSubcommands(t *testing.T) {
 	cmd := NewRunsCmd()
 
@@ -53,8 +55,8 @@ func TestRunsFromEdges(t *testing.T) {
 	if len(runs) != 2 {
 		t.Fatalf("expected 2 runs, got %d", len(runs))
 	}
-	if runs[0].ID != "run-1" {
-		t.Errorf("expected run ID %q, got %q", "run-1", runs[0].ID)
+	if runs[0].ID != testRunID1 {
+		t.Errorf("expected run ID %q, got %q", testRunID1, runs[0].ID)
 	}
 	if runs[0].Status != "COMPLETED" {
 		t.Errorf("expected status %q, got %q", "COMPLETED", runs[0].Status)
@@ -236,25 +238,25 @@ func TestRunsList_Success(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	runs, ok := result["runs"].([]interface{})
+	runs, ok := result["runs"].([]any)
 	if !ok {
 		t.Fatalf("expected 'runs' to be an array, got %T", result["runs"])
 	}
 
 	ids := make(map[string]bool)
 	for _, r := range runs {
-		rm, _ := r.(map[string]interface{})
+		rm, _ := r.(map[string]any)
 		if id, ok := rm["id"]; ok {
 			ids[id.(string)] = true
 		}
 	}
 
-	if !ids["run-1"] {
+	if !ids[testRunID1] {
 		t.Error("expected output to contain run-1")
 	}
 	if !ids["run-2"] {
@@ -283,8 +285,8 @@ func TestRunsList_Table(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "run-1") {
-		t.Errorf("expected table output to contain %q, got: %s", "run-1", got)
+	if !strings.Contains(got, testRunID1) {
+		t.Errorf("expected table output to contain %q, got: %s", testRunID1, got)
 	}
 	if !strings.Contains(got, "My Func") {
 		t.Errorf("expected table output to contain %q, got: %s", "My Func", got)
@@ -311,13 +313,13 @@ func TestRunsGet_Success(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if id, ok := result["id"]; !ok || id.(string) != "run-1" {
-		t.Errorf("expected run ID %q, got %v", "run-1", result["id"])
+	if id, ok := result["id"]; !ok || id.(string) != testRunID1 {
+		t.Errorf("expected run ID %q, got %v", testRunID1, result["id"])
 	}
 	if status, ok := result["status"]; !ok || status.(string) != "COMPLETED" {
 		t.Errorf("expected status %q, got %v", "COMPLETED", result["status"])
@@ -344,13 +346,13 @@ func TestRunsCancel_Force(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if id, ok := result["id"]; !ok || id.(string) != "run-1" {
-		t.Errorf("expected id %q, got %v", "run-1", result["id"])
+	if id, ok := result["id"]; !ok || id.(string) != testRunID1 {
+		t.Errorf("expected id %q, got %v", testRunID1, result["id"])
 	}
 	if status, ok := result["status"]; !ok || status.(string) != "CANCELLED" {
 		t.Errorf("expected status %q, got %v", "CANCELLED", result["status"])
@@ -377,13 +379,13 @@ func TestRunsReplay_Success(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if v, ok := result["originalRunID"]; !ok || v.(string) != "run-1" {
-		t.Errorf("expected originalRunID %q, got %v", "run-1", result["originalRunID"])
+	if v, ok := result["originalRunID"]; !ok || v.(string) != testRunID1 {
+		t.Errorf("expected originalRunID %q, got %v", testRunID1, result["originalRunID"])
 	}
 	if v, ok := result["newRunID"]; !ok || v.(string) != "new-run-id" {
 		t.Errorf("expected newRunID %q, got %v", "new-run-id", result["newRunID"])
@@ -410,8 +412,8 @@ func TestRunsList_WithStatusFilter(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "run-1") {
-		t.Errorf("expected output to contain run-1, got: %s", got)
+	if !strings.Contains(got, testRunID1) {
+		t.Errorf("expected output to contain testRunID1, got: %s", got)
 	}
 }
 
@@ -602,13 +604,13 @@ func TestRunsCancel_NonForce_Yes(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
 
-	if result["id"] != "run-1" {
-		t.Errorf("expected id %q, got %v", "run-1", result["id"])
+	if result["id"] != testRunID1 {
+		t.Errorf("expected id %q, got %v", testRunID1, result["id"])
 	}
 	if result["status"] != "CANCELLED" {
 		t.Errorf("expected status %q, got %v", "CANCELLED", result["status"])
@@ -646,7 +648,7 @@ func TestRunsReplay_Text(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "text"
+	state.Output = testOutputText
 
 	cmd := NewRunsCmd()
 	cmd.SetArgs([]string{"replay", "run-1"})
@@ -686,7 +688,7 @@ func TestRunsGet_Text(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "text"
+	state.Output = testOutputText
 
 	cmd := NewRunsCmd()
 	cmd.SetArgs([]string{"get", "run-1"})
@@ -700,8 +702,8 @@ func TestRunsGet_Text(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "run-1") {
-		t.Errorf("expected text output to contain run-1, got: %s", got)
+	if !strings.Contains(got, testRunID1) {
+		t.Errorf("expected text output to contain testRunID1, got: %s", got)
 	}
 	if !strings.Contains(got, "COMPLETED") {
 		t.Errorf("expected text output to contain COMPLETED, got: %s", got)

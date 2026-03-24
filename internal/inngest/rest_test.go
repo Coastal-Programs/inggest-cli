@@ -41,7 +41,7 @@ func TestGetREST_UnmarshalError(t *testing.T) {
 		SigningKey: "test-key",
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	err := client.GetREST(context.Background(), "test/path", &result)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON body, got nil")
@@ -65,7 +65,7 @@ func TestGetREST_ReadBodyError(t *testing.T) {
 	})
 	client.httpClient.Transport = &errBodyTransport{wrapped: srv.Client().Transport}
 
-	var result map[string]interface{}
+	var result map[string]any
 	err := client.GetREST(context.Background(), "test/path", &result)
 	if err == nil {
 		t.Fatal("expected error when response body read fails, got nil")

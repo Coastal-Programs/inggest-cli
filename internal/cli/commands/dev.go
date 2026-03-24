@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 // NewDevCmd returns the "dev" command group for interacting with the local dev server.
@@ -52,7 +53,7 @@ func newDevStatusCmd() *cobra.Command {
 			ctx := context.Background()
 
 			if !client.IsDevServerRunning(ctx) {
-				return output.Print(map[string]interface{}{
+				return output.Print(map[string]any{
 					"status":  "offline",
 					"url":     state.DevServer,
 					"message": "Dev server is not reachable. Start it with: npx inngest-cli@latest dev",
@@ -64,7 +65,7 @@ func newDevStatusCmd() *cobra.Command {
 				return fmt.Errorf("fetching dev server info: %w", err)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"status":    "online",
 				"url":       state.DevServer,
 				"version":   info.Version,
@@ -156,7 +157,7 @@ func newDevRunsCmd() *cobra.Command {
   }
 }`
 
-			filter := map[string]interface{}{
+			filter := map[string]any{
 				"from": fromTime.Format(time.RFC3339),
 			}
 			if status != "" {
@@ -166,7 +167,7 @@ func newDevRunsCmd() *cobra.Command {
 				filter["functionSlug"] = function
 			}
 
-			variables := map[string]interface{}{
+			variables := map[string]any{
 				"first":  limit,
 				"filter": filter,
 			}
@@ -183,7 +184,7 @@ func newDevRunsCmd() *cobra.Command {
 				runs[i] = edge.Node
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"runs":       runs,
 				"totalCount": result.Runs.TotalCount,
 			}, format)
@@ -212,7 +213,7 @@ func newDevSendCmd() *cobra.Command {
 
 			eventName := args[0]
 
-			var eventData interface{}
+			var eventData any
 			switch {
 			case data != "":
 				if err := json.Unmarshal([]byte(data), &eventData); err != nil {
@@ -231,10 +232,10 @@ func newDevSendCmd() *cobra.Command {
 			}
 
 			if eventData == nil {
-				eventData = map[string]interface{}{}
+				eventData = map[string]any{}
 			}
 
-			event := map[string]interface{}{
+			event := map[string]any{
 				"name": eventName,
 				"data": eventData,
 				"ts":   time.Now().UnixMilli(),
@@ -245,7 +246,7 @@ func newDevSendCmd() *cobra.Command {
 				return fmt.Errorf("sending event: %w", err)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"event_name": eventName,
 				"event_ids":  ids,
 			}, format)
@@ -271,14 +272,14 @@ func newDevInvokeCmd() *cobra.Command {
 
 			slug := args[0]
 
-			var payload interface{}
+			var payload any
 			if data != "" {
 				if err := json.Unmarshal([]byte(data), &payload); err != nil {
 					return fmt.Errorf("invalid --data JSON: %w", err)
 				}
 			}
 			if payload == nil {
-				payload = map[string]interface{}{}
+				payload = map[string]any{}
 			}
 
 			id, err := client.InvokeDevFunction(ctx, slug, payload)
@@ -286,7 +287,7 @@ func newDevInvokeCmd() *cobra.Command {
 				return fmt.Errorf("invoking function: %w", err)
 			}
 
-			return output.Print(map[string]interface{}{
+			return output.Print(map[string]any{
 				"function_slug": slug,
 				"event_id":      id,
 			}, format)

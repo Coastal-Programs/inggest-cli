@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+const (
+	testRunID1Events    = "run-1"
+	testStatusCompleted = "COMPLETED"
+	testRunID2          = "run-2"
+	testEmptyEventsResp = `{"data": {"eventsV2": {"edges": [], "pageInfo": {"hasNextPage": false}, "totalCount": 0}}}`
+)
+
 func TestSendEvent_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -18,11 +25,11 @@ func TestSendEvent_Success(t *testing.T) {
 		if !strings.HasSuffix(r.URL.Path, "/e/test-event-key") {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+		if ct := r.Header.Get("Content-Type"); ct != testApplicationJSON {
 			t.Errorf("expected Content-Type application/json, got %s", ct)
 		}
 
-		var body map[string]interface{}
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("failed to decode request body: %v", err)
 		}
@@ -32,7 +39,7 @@ func TestSendEvent_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ids":    []string{"ev-1"},
 			"status": 200,
 		})
@@ -45,7 +52,7 @@ func TestSendEvent_Success(t *testing.T) {
 		DevServerURL: srv.URL,
 	})
 
-	event := map[string]interface{}{
+	event := map[string]any{
 		"name": "test/event.sent",
 		"data": map[string]string{"foo": "bar"},
 	}
@@ -65,7 +72,7 @@ func TestSendEvent_Success(t *testing.T) {
 func TestSendEvent_MultipleIDs(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ids":    []string{"ev-1", "ev-2", "ev-3"},
 			"status": 200,
 		})
@@ -78,7 +85,7 @@ func TestSendEvent_MultipleIDs(t *testing.T) {
 		DevServerURL: srv.URL,
 	})
 
-	ids, err := c.SendEvent(context.Background(), []map[string]interface{}{
+	ids, err := c.SendEvent(context.Background(), []map[string]any{
 		{"name": "test/a", "data": map[string]string{}},
 		{"name": "test/b", "data": map[string]string{}},
 		{"name": "test/c", "data": map[string]string{}},
@@ -159,7 +166,7 @@ func TestSendEvent_InvalidJSON(t *testing.T) {
 func TestSendEvent_CancelledContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ids": []string{"ev-1"}, "status": 200})
+		json.NewEncoder(w).Encode(map[string]any{"ids": []string{"ev-1"}, "status": 200})
 	}))
 	defer srv.Close()
 
@@ -269,10 +276,10 @@ func TestListEvents(t *testing.T) {
 
 	// First event.
 	evt := conn.Edges[0].Node
-	if evt.ID != "evt-1" {
+	if evt.ID != testEvtID1 {
 		t.Errorf("expected ID 'evt-1', got %q", evt.ID)
 	}
-	if evt.Name != "user/signup" {
+	if evt.Name != testTriggerUserSignup {
 		t.Errorf("expected Name 'user/signup', got %q", evt.Name)
 	}
 	if evt.CreatedAt == nil {
@@ -284,16 +291,16 @@ func TestListEvents(t *testing.T) {
 	if len(evt.Runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(evt.Runs))
 	}
-	if evt.Runs[0].ID != "run-1" {
+	if evt.Runs[0].ID != testRunID1Events {
 		t.Errorf("expected run ID 'run-1', got %q", evt.Runs[0].ID)
 	}
-	if evt.Runs[0].Status != "COMPLETED" {
+	if evt.Runs[0].Status != testStatusCompleted {
 		t.Errorf("expected run status 'COMPLETED', got %q", evt.Runs[0].Status)
 	}
 	if evt.Runs[0].Function == nil {
 		t.Fatal("expected run function to be non-nil")
 	}
-	if evt.Runs[0].Function.Name != "Send Email" {
+	if evt.Runs[0].Function.Name != testSendEmail {
 		t.Errorf("expected function name 'Send Email', got %q", evt.Runs[0].Function.Name)
 	}
 	if conn.Edges[0].Cursor != "c1" {
@@ -310,7 +317,7 @@ func TestListEvents(t *testing.T) {
 }
 
 func TestListEventsError(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "unauthorized"}]}`
+	response := testUnauthorizedResp
 
 	srv := newTestServer(t, response, nil)
 	defer srv.Close()
@@ -378,7 +385,7 @@ func TestGetEvent(t *testing.T) {
 	if captured.Variables == nil {
 		t.Fatal("expected variables to be non-nil")
 	}
-	if eventID, ok := captured.Variables["eventId"].(string); !ok || eventID != "evt-1" {
+	if eventID, ok := captured.Variables["eventId"].(string); !ok || eventID != testEvtID1 {
 		t.Errorf("expected eventId variable 'evt-1', got %v", captured.Variables["eventId"])
 	}
 
@@ -386,10 +393,10 @@ func TestGetEvent(t *testing.T) {
 	if event == nil {
 		t.Fatal("expected non-nil event")
 	}
-	if event.ID != "evt-1" {
+	if event.ID != testEvtID1 {
 		t.Errorf("expected ID 'evt-1', got %q", event.ID)
 	}
-	if event.Name != "user/signup" {
+	if event.Name != testTriggerUserSignup {
 		t.Errorf("expected Name 'user/signup', got %q", event.Name)
 	}
 	if event.CreatedAt == nil {
@@ -405,17 +412,17 @@ func TestGetEvent(t *testing.T) {
 		t.Fatalf("expected 2 runs, got %d", len(event.Runs))
 	}
 
-	if event.Runs[0].ID != "run-1" {
+	if event.Runs[0].ID != testRunID1Events {
 		t.Errorf("expected run[0] ID 'run-1', got %q", event.Runs[0].ID)
 	}
-	if event.Runs[0].Status != "COMPLETED" {
+	if event.Runs[0].Status != testStatusCompleted {
 		t.Errorf("expected run[0] status 'COMPLETED', got %q", event.Runs[0].Status)
 	}
 	if event.Runs[0].Function == nil || event.Runs[0].Function.Name != "Send Welcome Email" {
 		t.Errorf("expected run[0] function name 'Send Welcome Email'")
 	}
 
-	if event.Runs[1].ID != "run-2" {
+	if event.Runs[1].ID != testRunID2 {
 		t.Errorf("expected run[1] ID 'run-2', got %q", event.Runs[1].ID)
 	}
 	if event.Runs[1].Status != "FAILED" {
@@ -454,13 +461,13 @@ func TestGetEventRuns_Success(t *testing.T) {
 		if r.URL.Path != "/v1/events/evt-123/runs" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		if accept := r.Header.Get("Accept"); accept != "application/json" {
+		if accept := r.Header.Get("Accept"); accept != testApplicationJSON {
 			t.Errorf("expected Accept application/json, got %s", accept)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"data": []map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
 				{
 					"run_id":      "run-1",
 					"status":      "COMPLETED",
@@ -490,20 +497,20 @@ func TestGetEventRuns_Success(t *testing.T) {
 		t.Fatalf("expected 2 runs, got %d", len(runs))
 	}
 
-	if runs[0].ID != "run-1" {
+	if runs[0].ID != testRunID1Events {
 		t.Errorf("runs[0].ID = %s, want run-1", runs[0].ID)
 	}
-	if runs[0].Status != "COMPLETED" {
+	if runs[0].Status != testStatusCompleted {
 		t.Errorf("runs[0].Status = %s, want COMPLETED", runs[0].Status)
 	}
-	if runs[0].FunctionID != "fn-1" {
+	if runs[0].FunctionID != testFnID1 {
 		t.Errorf("runs[0].FunctionID = %s, want fn-1", runs[0].FunctionID)
 	}
 	if runs[0].Output != `{"result": true}` {
 		t.Errorf("runs[0].Output = %s, want {\"result\": true}", runs[0].Output)
 	}
 
-	if runs[1].ID != "run-2" {
+	if runs[1].ID != testRunID2 {
 		t.Errorf("runs[1].ID = %s, want run-2", runs[1].ID)
 	}
 	if runs[1].Status != "FAILED" {
@@ -517,8 +524,8 @@ func TestGetEventRuns_Success(t *testing.T) {
 func TestGetEventRuns_EmptyData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"data": []map[string]interface{}{},
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
 		})
 	}))
 	defer srv.Close()
@@ -566,8 +573,8 @@ func TestGetEventRuns_AuthHeader(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"data": []map[string]interface{}{},
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
 		})
 	}))
 	defer srv.Close()
@@ -588,7 +595,7 @@ func TestSendEvent_DevModeURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ids":    []string{"ev-1"},
 			"status": 200,
 		})
@@ -611,7 +618,7 @@ func TestSendEvent_DevModeURL(t *testing.T) {
 }
 
 func TestListEvents_SinceFilter(t *testing.T) {
-	response := `{"data": {"eventsV2": {"edges": [], "pageInfo": {"hasNextPage": false}, "totalCount": 0}}}`
+	response := testEmptyEventsResp
 
 	var captured graphqlRequest
 	srv := newTestServer(t, response, &captured)
@@ -637,7 +644,7 @@ func TestListEvents_SinceFilter(t *testing.T) {
 		t.Fatal("expected filter in variables")
 	}
 	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]interface{}
+	var filter map[string]any
 	if err := json.Unmarshal(filterBytes, &filter); err != nil {
 		t.Fatalf("failed to unmarshal filter: %v", err)
 	}
@@ -651,7 +658,7 @@ func TestListEvents_SinceFilter(t *testing.T) {
 }
 
 func TestListEvents_NameFilter(t *testing.T) {
-	response := `{"data": {"eventsV2": {"edges": [], "pageInfo": {"hasNextPage": false}, "totalCount": 0}}}`
+	response := testEmptyEventsResp
 
 	var captured graphqlRequest
 	srv := newTestServer(t, response, &captured)
@@ -675,7 +682,7 @@ func TestListEvents_NameFilter(t *testing.T) {
 		t.Fatal("expected filter in variables")
 	}
 	filterBytes, _ := json.Marshal(filterRaw)
-	var filter map[string]interface{}
+	var filter map[string]any
 	if err := json.Unmarshal(filterBytes, &filter); err != nil {
 		t.Fatalf("failed to unmarshal filter: %v", err)
 	}
@@ -689,7 +696,7 @@ func TestListEvents_NameFilter(t *testing.T) {
 }
 
 func TestListEvents_FirstDefaultsTo20(t *testing.T) {
-	response := `{"data": {"eventsV2": {"edges": [], "pageInfo": {"hasNextPage": false}, "totalCount": 0}}}`
+	response := testEmptyEventsResp
 
 	var captured graphqlRequest
 	srv := newTestServer(t, response, &captured)
@@ -761,7 +768,7 @@ func TestListEvents_RunWithNilFunction(t *testing.T) {
 	if run.Function != nil {
 		t.Errorf("expected nil Function for run without function field, got %+v", run.Function)
 	}
-	if run.ID != "run-1" {
+	if run.ID != testRunID1Events {
 		t.Errorf("expected run ID 'run-1', got %q", run.ID)
 	}
 }
@@ -860,8 +867,8 @@ func TestGetEvent_GraphQLError(t *testing.T) {
 func TestGetEventRuns_CancelledContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"data": []map[string]interface{}{},
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
 		})
 	}))
 	defer srv.Close()

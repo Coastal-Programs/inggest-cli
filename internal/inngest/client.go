@@ -68,9 +68,11 @@ func NewClient(opts ClientOptions) *Client {
 	}
 
 	transport := &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   true,
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -105,7 +107,7 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading request body: %w", err)
 		}
-		req.Body.Close()
+		_ = req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
@@ -130,7 +132,7 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 
 	// If auth failed and we have a fallback key, retry with it.
 	if resp.StatusCode == http.StatusUnauthorized && c.signingKeyFallback != "" {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		hashed, err := HashSigningKey(c.signingKeyFallback)
 		if err != nil {
 			req.Header.Set("Authorization", "Bearer "+c.signingKeyFallback)
@@ -150,11 +152,11 @@ func (c *Client) doWithRetry(req *http.Request, bodyBytes []byte) (*http.Respons
 	var resp *http.Response
 	var err error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := range maxRetries {
 		if bodyBytes != nil {
 			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
-		resp, err = c.httpClient.Do(req)
+		resp, err = c.httpClient.Do(req) //nolint:gosec // URL constructed from configured API base, not untrusted input
 		if err != nil {
 			return nil, fmt.Errorf("request failed: %w", err)
 		}
@@ -165,7 +167,7 @@ func (c *Client) doWithRetry(req *http.Request, bodyBytes []byte) (*http.Respons
 
 		// Rate limited — parse Retry-After and wait.
 		retryAfter := resp.Header.Get("Retry-After")
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		wait := time.Duration(attempt+1) * time.Second // default backoff
 		if retryAfter != "" {

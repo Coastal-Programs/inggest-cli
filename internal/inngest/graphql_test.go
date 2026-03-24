@@ -38,7 +38,7 @@ func TestExecuteGraphQL_Success(t *testing.T) {
 	if len(result.Functions) != 1 {
 		t.Fatalf("expected 1 function, got %d", len(result.Functions))
 	}
-	if result.Functions[0].ID != "fn-1" {
+	if result.Functions[0].ID != testFnID1 {
 		t.Errorf("expected function ID %q, got %q", "fn-1", result.Functions[0].ID)
 	}
 	if result.Functions[0].Name != "test-fn" {
@@ -133,7 +133,7 @@ func TestExecuteGraphQL_AuthHeader(t *testing.T) {
 		}
 
 		contentType := r.Header.Get("Content-Type")
-		if contentType != "application/json" {
+		if contentType != testApplicationJSON {
 			t.Errorf("expected Content-Type header %q, got %q", "application/json", contentType)
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -183,7 +183,7 @@ func TestExecuteGraphQL_ContentType(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if receivedContentType != "application/json" {
+	if receivedContentType != testApplicationJSON {
 		t.Errorf("expected Content-Type %q, got %q", "application/json", receivedContentType)
 	}
 }
@@ -222,7 +222,7 @@ func TestExecuteGraphQL_RequestBody(t *testing.T) {
 		APIBaseURL: srv.URL,
 	})
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"id": "fn-123",
 	}
 
@@ -242,7 +242,7 @@ func TestExecuteGraphQL_RequestBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if result.Function.Name != "my-func" {
+	if result.Function.Name != testMyFunc {
 		t.Errorf("expected function name %q, got %q", "my-func", result.Function.Name)
 	}
 }
@@ -351,7 +351,7 @@ func TestExecuteGraphQL_ReadBodyError(t *testing.T) {
 
 func TestExecuteGraphQL_MarshalError(t *testing.T) {
 	client := NewClient(ClientOptions{})
-	vars := map[string]interface{}{"bad": make(chan int)}
+	vars := map[string]any{"bad": make(chan int)}
 	err := client.ExecuteGraphQL(context.Background(), "Test", "query {}", vars, nil)
 	if err == nil {
 		t.Fatal("expected marshal error")

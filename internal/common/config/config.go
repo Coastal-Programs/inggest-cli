@@ -2,7 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,9 +33,7 @@ var (
 
 	// Injected for testing. Default to stdlib functions.
 	userConfigDirFn     = os.UserConfigDir
-	jsonMarshalIndentFn = func(v any, prefix, indent string) ([]byte, error) {
-		return json.MarshalIndent(v, prefix, indent)
-	}
+	jsonMarshalIndentFn = json.MarshalIndent
 )
 
 // ResetForTest resets the cached config path so tests can set INNGEST_CLI_CONFIG.
@@ -80,7 +80,7 @@ func getConfigPath() string {
 func Load() (*Config, error) {
 	path := getConfigPath()
 	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return &Config{}, nil
 	}
 	if err != nil {
@@ -103,31 +103,34 @@ func (c *Config) Save() error {
 	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)
 	}
-	return os.WriteFile(path, data, 0o600)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+	return nil
 }
 
-// GetSigningKey returns the signing key from config or INNGEST_SIGNING_KEY env var.
+// GetSigningKey returns the signing key, preferring INNGEST_SIGNING_KEY env var over config.
 func (c *Config) GetSigningKey() string {
-	if c.SigningKey != "" {
-		return c.SigningKey
+	if v := os.Getenv("INNGEST_SIGNING_KEY"); v != "" {
+		return v
 	}
-	return os.Getenv("INNGEST_SIGNING_KEY")
+	return c.SigningKey
 }
 
-// GetSigningKeyFallback returns the fallback signing key from config or INNGEST_SIGNING_KEY_FALLBACK env var.
+// GetSigningKeyFallback returns the fallback signing key, preferring INNGEST_SIGNING_KEY_FALLBACK env var over config.
 func (c *Config) GetSigningKeyFallback() string {
-	if c.SigningKeyFallback != "" {
-		return c.SigningKeyFallback
+	if v := os.Getenv("INNGEST_SIGNING_KEY_FALLBACK"); v != "" {
+		return v
 	}
-	return os.Getenv("INNGEST_SIGNING_KEY_FALLBACK")
+	return c.SigningKeyFallback
 }
 
-// GetEventKey returns the event key from config or INNGEST_EVENT_KEY env var.
+// GetEventKey returns the event key, preferring INNGEST_EVENT_KEY env var over config.
 func (c *Config) GetEventKey() string {
-	if c.EventKey != "" {
-		return c.EventKey
+	if v := os.Getenv("INNGEST_EVENT_KEY"); v != "" {
+		return v
 	}
-	return os.Getenv("INNGEST_EVENT_KEY")
+	return c.EventKey
 }
 
 // GetAPIBaseURL returns the API base URL, defaulting to https://api.inngest.com.

@@ -12,9 +12,9 @@ import (
 
 // graphqlRequest is the JSON body sent to the GraphQL endpoint.
 type graphqlRequest struct {
-	OperationName string                 `json:"operationName,omitempty"`
-	Query         string                 `json:"query"`
-	Variables     map[string]interface{} `json:"variables,omitempty"`
+	OperationName string         `json:"operationName,omitempty"`
+	Query         string         `json:"query"`
+	Variables     map[string]any `json:"variables,omitempty"`
 }
 
 // graphqlResponse is the JSON body returned from the GraphQL endpoint.
@@ -30,7 +30,7 @@ type graphqlError struct {
 
 // ExecuteGraphQL sends a GraphQL query and unmarshals the response data into result.
 // operationName identifies the operation for server-side logging and debugging.
-func (c *Client) ExecuteGraphQL(ctx context.Context, operationName string, query string, variables map[string]interface{}, result interface{}) error {
+func (c *Client) ExecuteGraphQL(ctx context.Context, operationName string, query string, variables map[string]any, result any) error {
 	body, err := json.Marshal(graphqlRequest{
 		OperationName: operationName,
 		Query:         query,
@@ -58,7 +58,7 @@ func (c *Client) ExecuteGraphQL(ctx context.Context, operationName string, query
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("inngest: graphql returned status %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("inngest: graphql returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
 	}
 
 	var gqlResp graphqlResponse

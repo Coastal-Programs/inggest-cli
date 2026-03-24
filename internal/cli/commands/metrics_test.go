@@ -89,11 +89,11 @@ func TestHealth_AllPassed(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123", EventKey: "evt-key-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = true
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewHealthCmd()
@@ -108,7 +108,7 @@ func TestHealth_AllPassed(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -135,11 +135,11 @@ func TestHealth_NoSigningKey(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewHealthCmd()
@@ -176,11 +176,11 @@ func TestMetrics_Success(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -195,7 +195,7 @@ func TestMetrics_Success(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -228,11 +228,11 @@ func TestBacklog_WithRuns(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -247,7 +247,7 @@ func TestBacklog_WithRuns(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -270,11 +270,11 @@ func TestBacklog_Empty(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -308,11 +308,11 @@ func TestMetrics_TextOutput(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -348,11 +348,11 @@ func TestMetrics_WithFunctionFilter(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -367,7 +367,7 @@ func TestMetrics_WithFunctionFilter(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -379,7 +379,7 @@ func TestMetrics_WithFunctionFilter(t *testing.T) {
 
 func TestMetrics_InvalidSince(t *testing.T) {
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewMetricsCmd()
 	cmd.SetArgs([]string{"--since", "notaduration"})
@@ -415,11 +415,11 @@ func TestHealth_TextOutput(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123", EventKey: "evt-key-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = true
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewHealthCmd()
@@ -455,11 +455,11 @@ func TestBacklog_TextOutput(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -492,11 +492,11 @@ func TestBacklog_TextWithEntries(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -529,11 +529,11 @@ func TestBacklog_UnknownFunction(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -569,11 +569,11 @@ func TestMetrics_Truncated(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -588,7 +588,7 @@ func TestMetrics_Truncated(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -611,11 +611,11 @@ func TestMetrics_TextTruncated(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -651,11 +651,11 @@ func TestBacklog_TableOutput(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "table"
+	state.Output = testOutputTable
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -700,11 +700,11 @@ func TestHealth_DevServerFail(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123", EventKey: "evt-key-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = closedDevURL // unreachable
 	state.DevMode = true           // forces dev_server check
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewHealthCmd()
@@ -743,11 +743,11 @@ func TestHealth_TextWithFailAndWarn(t *testing.T) {
 	// No signing key → fail, no event key → warn, API unreachable → fail,
 	// DevMode=true but dev server unreachable → fail
 	state.Config = &config.Config{}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = closedURL
 	state.DevServer = closedURL
 	state.DevMode = true
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewHealthCmd()
@@ -786,11 +786,11 @@ func TestHealth_TextWithSkip(t *testing.T) {
 
 	// signing_key + event_key configured so they pass; API will fail but that's ok.
 	state.Config = &config.Config{SigningKey: "signkey-test-123", EventKey: "evt-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = closedURL
 	state.DevServer = closedURL
 	state.DevMode = false // not dev mode and server unreachable → "skip"
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewHealthCmd()
@@ -824,11 +824,11 @@ func TestMetrics_ListRunsError(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -862,11 +862,11 @@ func TestBacklog_ListRunsError(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -903,11 +903,11 @@ func TestBacklog_TruncatedJSON(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -922,7 +922,7 @@ func TestBacklog_TruncatedJSON(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -958,11 +958,11 @@ func TestBacklog_TruncatedText(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "text"
+	state.Output = testOutputText
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()
@@ -1001,11 +1001,11 @@ func TestMetrics_NoDurations(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewMetricsCmd()
@@ -1020,7 +1020,7 @@ func TestMetrics_NoDurations(t *testing.T) {
 		}
 	})
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(got), &result); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
 	}
@@ -1052,11 +1052,11 @@ func TestBacklog_TableWithEntries(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "table"
+	state.Output = testOutputTable
 	state.APIBaseURL = srv.URL
 	state.DevServer = srv.URL
 	state.DevMode = false
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 	state.Env = ""
 
 	cmd := NewBacklogCmd()

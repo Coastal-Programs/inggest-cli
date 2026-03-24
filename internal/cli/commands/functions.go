@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
-	"github.com/spf13/cobra"
 )
 
 // NewFunctionsCmd returns the "functions" command group.
@@ -169,6 +170,15 @@ func printFunctionDetail(fn *inngest.Function) error {
 	return nil
 }
 
+// formatConfigLine creates a config line, appending the key suffix if key is non-empty.
+func formatConfigLine(label, base, key string) string {
+	line := fmt.Sprintf("  %-14s %s", label, base)
+	if key != "" {
+		line += fmt.Sprintf(" (key: %s)", key)
+	}
+	return line
+}
+
 func printConfiguration(cfg *inngest.FunctionConfiguration) {
 	if cfg.Retries != nil {
 		dflt := ""
@@ -192,32 +202,16 @@ func printConfiguration(cfg *inngest.FunctionConfiguration) {
 		}
 	}
 	if cfg.RateLimit != nil {
-		line := fmt.Sprintf("  Rate Limit:  %d per %s", cfg.RateLimit.Limit, cfg.RateLimit.Period)
-		if cfg.RateLimit.Key != "" {
-			line += fmt.Sprintf(" (key: %s)", cfg.RateLimit.Key)
-		}
-		fmt.Println(line)
+		fmt.Println(formatConfigLine("Rate Limit:", fmt.Sprintf("%d per %s", cfg.RateLimit.Limit, cfg.RateLimit.Period), cfg.RateLimit.Key))
 	}
 	if cfg.Debounce != nil {
-		line := fmt.Sprintf("  Debounce:    %s", cfg.Debounce.Period)
-		if cfg.Debounce.Key != "" {
-			line += fmt.Sprintf(" (key: %s)", cfg.Debounce.Key)
-		}
-		fmt.Println(line)
+		fmt.Println(formatConfigLine("Debounce:", cfg.Debounce.Period, cfg.Debounce.Key))
 	}
 	if cfg.Throttle != nil {
-		line := fmt.Sprintf("  Throttle:    limit: %d, burst: %d, period: %s", cfg.Throttle.Limit, cfg.Throttle.Burst, cfg.Throttle.Period)
-		if cfg.Throttle.Key != "" {
-			line += fmt.Sprintf(" (key: %s)", cfg.Throttle.Key)
-		}
-		fmt.Println(line)
+		fmt.Println(formatConfigLine("Throttle:", fmt.Sprintf("limit: %d, burst: %d, period: %s", cfg.Throttle.Limit, cfg.Throttle.Burst, cfg.Throttle.Period), cfg.Throttle.Key))
 	}
 	if cfg.EventsBatch != nil {
-		line := fmt.Sprintf("  Events Batch: maxSize: %d, timeout: %s", cfg.EventsBatch.MaxSize, cfg.EventsBatch.Timeout)
-		if cfg.EventsBatch.Key != "" {
-			line += fmt.Sprintf(" (key: %s)", cfg.EventsBatch.Key)
-		}
-		fmt.Println(line)
+		fmt.Println(formatConfigLine("Events Batch:", fmt.Sprintf("maxSize: %d, timeout: %s", cfg.EventsBatch.MaxSize, cfg.EventsBatch.Timeout), cfg.EventsBatch.Key))
 	}
 	if cfg.Priority != "" {
 		fmt.Printf("  Priority:    %s\n", cfg.Priority)
@@ -266,8 +260,8 @@ func newFunctionsConfigCmd() *cobra.Command {
 	}
 }
 
-func buildConfigOutput(fn *inngest.Function) map[string]interface{} {
-	result := map[string]interface{}{
+func buildConfigOutput(fn *inngest.Function) map[string]any {
+	result := map[string]any{
 		"slug": fn.Slug,
 		"name": fn.Name,
 	}
@@ -277,7 +271,7 @@ func buildConfigOutput(fn *inngest.Function) map[string]interface{} {
 	}
 
 	if fn.Config != "" {
-		var parsed interface{}
+		var parsed any
 		if err := json.Unmarshal([]byte(fn.Config), &parsed); err == nil {
 			result["rawConfig"] = parsed
 		} else {

@@ -10,6 +10,12 @@ import (
 	"testing"
 )
 
+const (
+	testApplicationJSON = "application/json"
+	testMyFunc          = "my-func"
+	testEvtID1          = "evt-1"
+)
+
 func TestIsDevServerRunning_Running(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -84,7 +90,7 @@ func TestGetDevInfo(t *testing.T) {
 		if r.URL.Path != "/dev" {
 			t.Errorf("expected path /dev, got %s", r.URL.Path)
 		}
-		if accept := r.Header.Get("Accept"); accept != "application/json" {
+		if accept := r.Header.Get("Accept"); accept != testApplicationJSON {
 			t.Errorf("expected Accept: application/json, got %s", accept)
 		}
 
@@ -116,10 +122,10 @@ func TestGetDevInfo(t *testing.T) {
 	if info.Functions[0].ID != "fn1" {
 		t.Errorf("expected function ID fn1, got %s", info.Functions[0].ID)
 	}
-	if info.Functions[0].Name != "my-func" {
+	if info.Functions[0].Name != testMyFunc {
 		t.Errorf("expected function name my-func, got %s", info.Functions[0].Name)
 	}
-	if info.Functions[0].Slug != "my-func" {
+	if info.Functions[0].Slug != testMyFunc {
 		t.Errorf("expected function slug my-func, got %s", info.Functions[0].Slug)
 	}
 }
@@ -143,9 +149,9 @@ func TestGetDevInfo_ServerError(t *testing.T) {
 }
 
 func TestSendDevEvent(t *testing.T) {
-	eventPayload := map[string]interface{}{
+	eventPayload := map[string]any{
 		"name": "test/event.sent",
-		"data": map[string]interface{}{
+		"data": map[string]any{
 			"userId": "user-123",
 		},
 	}
@@ -167,14 +173,14 @@ func TestSendDevEvent(t *testing.T) {
 		}
 		defer r.Body.Close()
 
-		var received map[string]interface{}
+		var received map[string]any
 		if err := json.Unmarshal(body, &received); err != nil {
 			t.Fatalf("failed to unmarshal request body: %v", err)
 		}
 		if received["name"] != "test/event.sent" {
 			t.Errorf("expected event name test/event.sent, got %v", received["name"])
 		}
-		data, ok := received["data"].(map[string]interface{})
+		data, ok := received["data"].(map[string]any)
 		if !ok {
 			t.Fatalf("expected data to be a map, got %T", received["data"])
 		}
@@ -184,7 +190,7 @@ func TestSendDevEvent(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ids":    []string{"evt-001", "evt-002"},
 			"status": 200,
 		})
@@ -235,10 +241,10 @@ func TestSendDevEvent_ServerError(t *testing.T) {
 }
 
 func TestInvokeDevFunction(t *testing.T) {
-	invokeData := map[string]interface{}{
-		"event": map[string]interface{}{
+	invokeData := map[string]any{
+		"event": map[string]any{
 			"name": "test/invoke",
-			"data": map[string]interface{}{
+			"data": map[string]any{
 				"key": "value",
 			},
 		},
@@ -251,7 +257,7 @@ func TestInvokeDevFunction(t *testing.T) {
 		if r.URL.Path != "/invoke/my-function" {
 			t.Errorf("expected path /invoke/my-function, got %s", r.URL.Path)
 		}
-		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+		if ct := r.Header.Get("Content-Type"); ct != testApplicationJSON {
 			t.Errorf("expected Content-Type application/json, got %s", ct)
 		}
 
@@ -261,7 +267,7 @@ func TestInvokeDevFunction(t *testing.T) {
 		}
 		defer r.Body.Close()
 
-		var received map[string]interface{}
+		var received map[string]any
 		if err := json.Unmarshal(body, &received); err != nil {
 			t.Fatalf("failed to unmarshal request body: %v", err)
 		}
@@ -271,7 +277,7 @@ func TestInvokeDevFunction(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"id":     "run-001",
 			"status": 200,
 		})
@@ -334,7 +340,7 @@ func TestSendDevEvent_EmptyIDs(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ids":    []string{},
 			"status": 200,
 		})
@@ -363,7 +369,7 @@ func TestSendDevEvent_EmptyEventKeyFallbackToTest(t *testing.T) {
 		capturedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ids":    []string{"evt-1"},
 			"status": 200,
 		})
@@ -574,7 +580,7 @@ func TestInvokeDevFunction_InvalidJSON_Response(t *testing.T) {
 		DevServerURL: srv.URL,
 	})
 
-	_, err := client.InvokeDevFunction(context.Background(), "my-func", map[string]string{"key": "val"})
+	_, err := client.InvokeDevFunction(context.Background(), testMyFunc, map[string]string{"key": "val"})
 	if err == nil {
 		t.Fatal("expected error for invalid JSON response, got nil")
 	}

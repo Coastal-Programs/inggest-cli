@@ -32,7 +32,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   fi
 
   echo "Building ${GOOS}/${GOARCH}..."
-  GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags "${LDFLAGS}" -o "${OUTPUT}" "${CMD}"
+  CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -trimpath -ldflags "${LDFLAGS}" -o "${OUTPUT}" "${CMD}"
 
   if [ "${GOOS}" = "windows" ]; then
     zip -j "${ARCHIVE}" "${OUTPUT}"

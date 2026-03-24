@@ -14,6 +14,11 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
+const (
+	testOutputTable = "table"
+	testOutputText  = "text"
+)
+
 func TestEnvCmdHasSubcommands(t *testing.T) {
 	cmd := NewEnvCmd()
 
@@ -44,7 +49,7 @@ func TestEnvUseUpdatesConfig(t *testing.T) {
 	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEnvCmd()
 	cmd.SetArgs([]string{"use", "staging"})
@@ -75,7 +80,7 @@ func TestEnvUseUpdatesConfig(t *testing.T) {
 
 func TestEnvUseRequiresArg(t *testing.T) {
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEnvCmd()
 	cmd.SetArgs([]string{"use"})
@@ -91,7 +96,7 @@ func TestEnvUseRequiresArg(t *testing.T) {
 
 func TestPrintEnvTable(t *testing.T) {
 	state.Env = "my-app"
-	state.Output = "table"
+	state.Output = testOutputTable
 
 	apps := []inngest.App{
 		{
@@ -167,12 +172,12 @@ func setupCloudState(t *testing.T, srvURL string) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = "json"
+	state.Output = testOutputJSON
 	state.APIBaseURL = srvURL
 	state.DevServer = srvURL
 	state.DevMode = false
 	state.Env = ""
-	state.AppVersion = "test"
+	state.AppVersion = testAppVersion
 }
 
 const listAppsResponse = `{"data":{"apps":[{"id":"app-1","name":"my-app","sdkLanguage":"go","sdkVersion":"0.1.0","framework":"stdlib","url":"https://example.com","connected":true,"functionCount":3},{"id":"app-2","name":"other-app","sdkLanguage":"typescript","sdkVersion":"1.0.0","connected":false,"functionCount":1}]}}`
@@ -186,7 +191,7 @@ func TestEnvList_JSON(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	var cmdErr error
 	out := captureStdout(t, func() {
@@ -219,7 +224,7 @@ func TestEnvList_Table(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "table"
+	state.Output = testOutputTable
 
 	var cmdErr error
 	out := captureStdout(t, func() {
@@ -251,7 +256,7 @@ func TestEnvGet_ByName(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	var cmdErr error
 	out := captureStdout(t, func() {
@@ -280,7 +285,7 @@ func TestEnvGet_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEnvCmd()
 	cmd.SetArgs([]string{"get", "nonexistent"})
@@ -305,7 +310,7 @@ func TestEnvGet_TextOutput(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "text"
+	state.Output = testOutputText
 
 	var cmdErr error
 	out := captureStdout(t, func() {
@@ -338,7 +343,7 @@ func TestEnvGet_ByID(t *testing.T) {
 	defer srv.Close()
 
 	setupCloudState(t, srv.URL)
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	var cmdErr error
 	out := captureStdout(t, func() {
@@ -401,7 +406,7 @@ func TestEnvUse_SaveError(t *testing.T) {
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	state.Config = &config.Config{}
-	state.Output = "json"
+	state.Output = testOutputJSON
 
 	cmd := NewEnvCmd()
 	cmd.SetArgs([]string{"use", "staging"})
