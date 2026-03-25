@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://go.dev/">
-    <img src="https://img.shields.io/badge/go-%3E%3D1.25-00ADD8.svg" alt="Go Version">
+    <img src="https://img.shields.io/badge/go-%3E%3D1.26-00ADD8.svg" alt="Go Version">
   </a>
   <a href="https://github.com/Coastal-Programs/inggest-cli/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
@@ -46,7 +46,7 @@ A command-line interface for monitoring, debugging, and managing [Inngest](https
 go install github.com/Coastal-Programs/inggest-cli/cmd/inngest@latest
 ```
 
-Requires Go 1.25+.
+Requires Go 1.26+.
 
 **Option 2: Build from source**
 ```bash
@@ -111,7 +111,7 @@ inngest functions config my-app-process-order
 | Command | Description |
 |---------|-------------|
 | `inngest runs list` | List recent function runs |
-| `inngest runs get <run-id>` | Get full run details including trace |
+| `inngest runs get <run-id>` | Get run details (status, function, timing) |
 | `inngest runs cancel <run-id>` | Cancel a running function |
 | `inngest runs replay <run-id>` | Replay a function run |
 | `inngest runs watch` | Watch for new runs in real-time |
@@ -120,7 +120,7 @@ inngest functions config my-app-process-order
 # Filter by status and time range
 inngest runs list --status FAILED --since 1h --limit 50
 
-# Get full trace for a run
+# Get run details
 inngest runs get 01HXYZ... --output text
 
 # Watch runs live
@@ -144,7 +144,7 @@ inngest events send test/user.signup --data '{"userId": "123"}'
 echo '{"userId": "456"}' | inngest events send test/user.signup
 
 # List recent events of a specific type
-inngest events list --name user.signup --since 24h
+inngest events list --name user.signup
 ```
 
 ### Environments

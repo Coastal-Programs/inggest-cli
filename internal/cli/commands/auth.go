@@ -239,7 +239,7 @@ func newAuthStatusCmd() *cobra.Command {
 // isInteractiveFn is the function used to check if stdin is a terminal.
 // Overridden in tests to simulate interactive/non-interactive modes.
 var isInteractiveFn = func() bool {
-	return term.IsTerminal(syscall.Stdin)
+	return term.IsTerminal(int(syscall.Stdin)) //nolint:unconvert // required for Windows compatibility
 }
 
 // isInteractive returns true if stdin is a terminal.
@@ -256,8 +256,8 @@ var readSecretFn = defaultReadSecret
 
 func defaultReadSecret(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
-	bytes, err := termReadPasswordFn(syscall.Stdin)
-	fmt.Fprintln(os.Stderr) // newline after hidden input
+	bytes, err := termReadPasswordFn(int(syscall.Stdin)) //nolint:unconvert // required for Windows compatibility
+	fmt.Fprintln(os.Stderr)                              // newline after hidden input
 	if err != nil {
 		return "", fmt.Errorf("failed to read input: %w", err)
 	}
