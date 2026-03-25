@@ -215,18 +215,48 @@ func TestCancelRun(t *testing.T) {
 	}
 }
 
-func TestCancelRun_MissingEnvID(t *testing.T) {
+func TestCancelRun_NoEnvID(t *testing.T) {
+	response := `{
+		"data": {
+			"cancelRun": {
+				"id": "run-1",
+				"status": "CANCELLED"
+			}
+		}
+	}`
+
+	var captured graphqlRequest
+	srv := newTestServer(t, response, &captured)
+	defer srv.Close()
+
 	client := NewClient(ClientOptions{
 		SigningKey: "test-key",
-		APIBaseURL: "http://localhost:9999",
+		APIBaseURL: srv.URL,
 	})
 
-	_, err := client.CancelRun(context.Background(), "", "run-1")
-	if err == nil {
-		t.Fatal("expected error for missing envID, got nil")
+	run, err := client.CancelRun(context.Background(), "", testRunID1Events)
+	if err != nil {
+		t.Fatalf("CancelRun returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "environment ID") {
-		t.Errorf("expected error about environment ID, got %q", err.Error())
+
+	if run.ID != testRunID1Events {
+		t.Errorf("expected ID 'run-1', got %q", run.ID)
+	}
+	if run.Status != "CANCELLED" {
+		t.Errorf("expected status 'CANCELLED', got %q", run.Status)
+	}
+
+	// Verify the query does NOT contain $envID when envID is empty.
+	if strings.Contains(captured.Query, "$envID") {
+		t.Errorf("expected query to NOT contain '$envID' when envID is empty, got %q", captured.Query)
+	}
+	if strings.Contains(captured.Query, "envID:") {
+		t.Errorf("expected query to NOT contain 'envID:' when envID is empty, got %q", captured.Query)
+	}
+
+	// Verify the envID variable was NOT sent.
+	if _, ok := captured.Variables["envID"]; ok {
+		t.Errorf("expected no envID variable, but got %v", captured.Variables["envID"])
 	}
 }
 

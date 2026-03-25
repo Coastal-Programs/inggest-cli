@@ -16,6 +16,7 @@ import (
 const (
 	testOutputTable = "table"
 	testOutputText  = "text"
+	testProduction  = "production"
 )
 
 func TestEnvCmdHasSubcommands(t *testing.T) {
@@ -61,11 +62,11 @@ func TestEnvUseUpdatesConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if state.Config.ActiveEnv != "staging" {
-		t.Errorf("expected ActiveEnv %q, got %q", "staging", state.Config.ActiveEnv)
+	if state.Config.ActiveEnv != testStaging {
+		t.Errorf("expected ActiveEnv %q, got %q", testStaging, state.Config.ActiveEnv)
 	}
-	if state.Env != "staging" {
-		t.Errorf("expected state.Env %q, got %q", "staging", state.Env)
+	if state.Env != testStaging {
+		t.Errorf("expected state.Env %q, got %q", testStaging, state.Env)
 	}
 
 	data, err := os.ReadFile(cfgPath)
@@ -94,7 +95,7 @@ func TestEnvUseRequiresArg(t *testing.T) {
 }
 
 func TestPrintEnvTable(t *testing.T) {
-	state.Env = "production"
+	state.Env = testProduction
 	state.Output = testOutputTable
 
 	envs := []inngest.Environment{

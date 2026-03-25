@@ -51,7 +51,7 @@ func newEnvListCmd() *cobra.Command {
 
 			envs, err := client.ListEnvironments(ctx)
 			if err != nil {
-				if errors.Is(err, inngest.ErrAccountAuthRequired) {
+				if errors.Is(err, inngest.ErrAccountAuthRequired) || strings.Contains(strings.ToLower(err.Error()), "authenticat") {
 					return printCurrentEnvFallback(format, err)
 				}
 				return fmt.Errorf("listing environments: %w", err)
@@ -121,7 +121,7 @@ func newEnvGetCmd() *cobra.Command {
 
 			env, err := client.GetEnvironment(ctx, nameOrID)
 			if err != nil {
-				if errors.Is(err, inngest.ErrAccountAuthRequired) {
+				if errors.Is(err, inngest.ErrAccountAuthRequired) || strings.Contains(strings.ToLower(err.Error()), "authenticat") {
 					return printCurrentEnvFallback(format, err)
 				}
 				return fmt.Errorf("environment %q not found: %w", nameOrID, err)

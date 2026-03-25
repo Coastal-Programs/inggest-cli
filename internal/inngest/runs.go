@@ -213,23 +213,27 @@ func (c *Client) GetRun(ctx context.Context, runID string) (*FunctionRun, error)
 }
 
 // CancelRun cancels a running function via GraphQL mutation.
-// The Inngest Cloud API requires envID for cancelRun. Pass envID obtained from
-// the --env-id flag or the INNGEST_ENV_ID environment variable.
+// When envID is provided (via --env-id flag or INNGEST_ENV_ID env var) it is
+// included in the mutation. Inngest Cloud requires envID; the dev server does not.
 func (c *Client) CancelRun(ctx context.Context, envID, runID string) (*FunctionRun, error) {
-	if envID == "" {
-		return nil, fmt.Errorf("inngest: cancel run requires environment ID; set --env-id flag or INNGEST_ENV_ID env var")
-	}
+	var query string
+	variables := map[string]any{"runID": runID}
 
-	query := `mutation CancelRun($envID: UUID!, $runID: ULID!) {
+	if envID != "" {
+		query = `mutation CancelRun($envID: UUID!, $runID: ULID!) {
   cancelRun(envID: $envID, runID: $runID) {
     id
     status
   }
 }`
-
-	variables := map[string]any{
-		"envID": envID,
-		"runID": runID,
+		variables["envID"] = envID
+	} else {
+		query = `mutation CancelRun($runID: ULID!) {
+  cancelRun(runID: $runID) {
+    id
+    status
+  }
+}`
 	}
 
 	var result struct {
@@ -240,6 +244,9 @@ func (c *Client) CancelRun(ctx context.Context, envID, runID string) (*FunctionR
 	}
 
 	if err := c.ExecuteGraphQL(ctx, "CancelRun", query, variables, &result); err != nil {
+		if envID == "" && strings.Contains(strings.ToLower(err.Error()), "envid") {
+			return nil, fmt.Errorf("inngest: cancel run: %w\nhint: Inngest Cloud requires --env-id flag or INNGEST_ENV_ID env var", err)
+		}
 		return nil, fmt.Errorf("inngest: cancel run: %w", err)
 	}
 
