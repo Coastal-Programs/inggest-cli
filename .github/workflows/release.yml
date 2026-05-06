@@ -68,13 +68,13 @@ jobs:
         run: |
           for dir in npm/darwin-arm64 npm/darwin-x64 npm/linux-x64 npm/linux-arm64 npm/windows-x64; do
             echo "Publishing ${dir}..."
-            (cd "${dir}" && npm publish --access public)
+            (cd "${dir}" && npm publish --access restricted)
           done
 
       - name: Publish root package to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --access restricted
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
