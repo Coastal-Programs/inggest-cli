@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.0] - 2026-05-06
+
+This release adds npm distribution so the CLI can be installed via `npm install -g @coastal-programs/inggest`.
+
+### Added
+- npm package `@coastal-programs/inggest` with per-platform optional sub-packages (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `windows-x64`)
+- `bin/inngest.js` wrapper that resolves and execs the correct platform binary
+- `scripts/bump-version.sh` for atomic version sync across all 6 `package.json` files
+- CI: `release.yml` now publishes all 6 npm packages (`--access restricted`) on tag push
+
 ## [Unreleased]
 
 ### Added
