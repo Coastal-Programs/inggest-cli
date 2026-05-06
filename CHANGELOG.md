@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.2] - 2026-05-06
+
+### Fixed
+- Release workflow: publish scoped npm packages with `--access public` (was `--access restricted`, which requires a paid npm org plan and caused E402 errors)
+
 ## [0.2.1] - 2026-05-06
 
 ### Fixed
