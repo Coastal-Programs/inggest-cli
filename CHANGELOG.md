@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-05-06
+
+### Fixed
+- `runs list --status` flag help now shows all-caps status values (`RUNNING,COMPLETED,FAILED,CANCELLED,QUEUED`) matching the Inngest API; was showing mixed-case which caused confusion
+- Cancel confirmation prompt prints `Aborted.` when the user declines, not `Cancelled.` (which implied the run was cancelled)
+
 ## [0.2.0] - 2026-05-06
 
 This release adds npm distribution so the CLI can be installed via `npm install -g @coastal-programs/inggest`.
