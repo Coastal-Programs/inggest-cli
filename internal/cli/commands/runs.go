@@ -97,7 +97,7 @@ func newRunsListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of runs to return")
-	cmd.Flags().StringVar(&status, "status", "", "Filter by status (comma-separated: Running,Completed,Failed,Cancelled,Queued)")
+	cmd.Flags().StringVar(&status, "status", "", "Filter by status (comma-separated: RUNNING,COMPLETED,FAILED,CANCELLED,QUEUED)")
 	cmd.Flags().StringVar(&function, "function", "", "Filter by function ID")
 	cmd.Flags().StringVar(&since, "since", "24h", "Show runs since this duration ago (e.g. 1h, 30m, 24h)")
 	cmd.Flags().StringVar(&until, "until", "", "Show runs until this duration ago (e.g. 1h)")
@@ -271,7 +271,7 @@ func newRunsCancelCmd() *cobra.Command {
 				var confirm string
 				_, _ = fmt.Scanln(&confirm)
 				if strings.ToLower(confirm) != "y" && strings.ToLower(confirm) != "yes" {
-					fmt.Fprintln(os.Stderr, "Cancelled.")
+					fmt.Fprintln(os.Stderr, "Aborted.")
 					return nil
 				}
 			}
