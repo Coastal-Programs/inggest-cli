@@ -21,6 +21,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
       - name: Extract release notes from CHANGELOG.md
         id: changelog
         run: |
@@ -31,10 +36,45 @@ jobs:
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Sync npm version to git tag
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"
+          # Update root package.json
+          npm version "${VERSION_NUM}" --no-git-tag-version --allow-same-version
+          # Update each platform sub-package
+          for dir in npm/darwin-arm64 npm/darwin-x64 npm/linux-x64 npm/linux-arm64 npm/windows-x64; do
+            (cd "${dir}" && npm version "${VERSION_NUM}" --no-git-tag-version --allow-same-version)
+          done
+          # Keep optionalDependencies in sync with the new version
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const ver = '${VERSION_NUM}';
+            for (const k of Object.keys(pkg.optionalDependencies)) {
+              pkg.optionalDependencies[k] = ver;
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
       - name: Build release binaries
         run: |
           chmod +x scripts/release.sh
           ./scripts/release.sh ${{ github.ref_name }}
+
+      - name: Publish platform sub-packages to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in npm/darwin-arm64 npm/darwin-x64 npm/linux-x64 npm/linux-arm64 npm/windows-x64; do
+            echo "Publishing ${dir}..."
+            (cd "${dir}" && npm publish --access restricted)
+          done
+
+      - name: Publish root package to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access restricted
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -1,0 +1,34 @@
+{
+  "name": "@coastal-programs/inggest",
+  "version": "0.1.0",
+  "description": "Inngest CLI for AI Agents & Automation — monitor, debug, and manage Inngest functions from the terminal.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Coastal-Programs/inggest-cli.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "inngest": "bin/inngest.js"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "optionalDependencies": {
+    "@coastal-programs/inggest-darwin-arm64": "0.1.0",
+    "@coastal-programs/inggest-darwin-x64": "0.1.0",
+    "@coastal-programs/inggest-linux-x64": "0.1.0",
+    "@coastal-programs/inggest-linux-arm64": "0.1.0",
+    "@coastal-programs/inggest-windows-x64": "0.1.0"
+  }
+}

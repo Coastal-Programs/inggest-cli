@@ -1,0 +1,27 @@
+{
+  "name": "@coastal-programs/inggest-windows-x64",
+  "version": "0.1.0",
+  "description": "The Windows x64 binary for the Inngest CLI.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Coastal-Programs/inggest-cli.git"
+  },
+  "license": "MIT",
+  "preferUnplugged": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "files": [
+    "inngest.exe",
+    "package.json"
+  ]
+}

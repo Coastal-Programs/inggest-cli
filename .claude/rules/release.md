@@ -37,9 +37,25 @@ Semver: `vMAJOR.MINOR.PATCH`
 - New command → MINOR (`v0.2.0`)
 - Breaking flag/output change → MAJOR (`v1.0.0`)
 
+### Version Files — ALL 6 must match
+
+When bumping, use the helper (updates all 6 atomically):
+```bash
+./scripts/bump-version.sh X.Y.Z
+```
+
+Files managed:
+1. `package.json` — `version` AND all `optionalDependencies` versions
+2. `npm/darwin-arm64/package.json`
+3. `npm/darwin-x64/package.json`
+4. `npm/linux-x64/package.json`
+5. `npm/linux-arm64/package.json`
+6. `npm/windows-x64/package.json`
+
 ### CHANGELOG.md format
 
-The CHANGELOG entry becomes the GitHub Release description automatically — write it well.
+The CHANGELOG entry is extracted by CI and becomes the GitHub Release description — write it well.
+
 Each version block must have:
 - A one or two sentence **summary** at the top describing what this release is about
 - `### Added` — new commands, features, endpoints
@@ -51,7 +67,7 @@ Example:
 ```markdown
 ## [0.3.0] - 2026-03-01
 
-This release adds budget reporting commands and improves error messages across all commands.
+This release adds run-replay and backlog commands, and fixes GraphQL pagination.
 
 ### Added
 - `inngest runs replay` — replay a function run
@@ -61,12 +77,25 @@ This release adds budget reporting commands and improves error messages across a
 - GraphQL cursor pagination no longer skips the last page
 ```
 
-### Steps
-1. Write `CHANGELOG.md` entry with summary + categorised changes (see format above)
-2. `git commit -m "chore: release v0.3.0"`
-3. `git tag -a v0.3.0 -m "Release v0.3.0"` — annotated tags only, never lightweight
-4. `git push origin v0.3.0`
+### Release Steps
 
-GitHub Actions extracts the CHANGELOG entry and uses it as the release description, then builds 5 platform binaries automatically.
+1. Write `CHANGELOG.md` entry (see format above)
+2. `./scripts/bump-version.sh X.Y.Z` — bumps all 6 package.json files
+3. `make release` — cross-compiles binaries AND copies them into `npm/<platform>/` dirs
+4. (Optional local publish) `cd npm/darwin-arm64 && npm publish --access restricted && cd ../..` etc.
+5. `git add package.json npm/*/package.json CHANGELOG.md`
+6. `git commit -m "chore: release vX.Y.Z"`
+7. `git tag -a vX.Y.Z -m "Release vX.Y.Z"` — annotated tags only, never lightweight
+8. `git push --follow-tags`
+
+Pushing the tag triggers `.github/workflows/release.yml`, which cross-compiles, copies binaries, publishes all 6 npm packages (`--access restricted`), and creates the GitHub Release.
 
 > Never push a tag without a well-written CHANGELOG entry first.
+
+### npm Publishing Notes
+
+- **Token type**: MUST use Classic Automation token (not Granular) — granular tokens cannot create new scoped packages
+- **2FA bypass**: Token must have "Bypass 2FA" enabled
+- **Publish order**: Platform packages FIRST, root wrapper LAST
+- **GitHub secret**: `NPM_TOKEN` already set in repo; refresh at https://www.npmjs.com/settings/jakeschepis/tokens
+- **Access**: all packages publish with `--access restricted` (private scoped)

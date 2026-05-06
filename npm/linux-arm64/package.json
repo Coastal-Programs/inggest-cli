@@ -1,0 +1,27 @@
+{
+  "name": "@coastal-programs/inggest-linux-arm64",
+  "version": "0.1.0",
+  "description": "The Linux ARM64 binary for the Inngest CLI.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Coastal-Programs/inggest-cli.git"
+  },
+  "license": "MIT",
+  "preferUnplugged": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "files": [
+    "inngest",
+    "package.json"
+  ]
+}

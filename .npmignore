@@ -1,0 +1,28 @@
+# Exclude Go source and build tooling from the npm tarball.
+# Only bin/, install.js, and README.md are shipped (see "files" in package.json).
+cmd/
+internal/
+pkg/
+scripts/
+build/
+dist/
+npm/
+.github/
+.claude/
+.gg/
+*.go
+go.mod
+go.sum
+go.work
+go.work.sum
+Makefile
+ARCHITECTURE.md
+CHANGELOG.md
+CLAUDE.md
+LICENSE
+cover.out
+coverage.out
+.golangci.yml
+.gitignore
+inngest
+inngest.exe

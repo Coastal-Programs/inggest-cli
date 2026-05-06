@@ -1,0 +1,27 @@
+{
+  "name": "@coastal-programs/inggest-darwin-x64",
+  "version": "0.1.0",
+  "description": "The macOS x64 binary for the Inngest CLI.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Coastal-Programs/inggest-cli.git"
+  },
+  "license": "MIT",
+  "preferUnplugged": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "files": [
+    "inngest",
+    "package.json"
+  ]
+}

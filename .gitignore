@@ -3,6 +3,17 @@
 /dist/
 /inngest
 /inngest.exe
+
+# npm sub-package binaries (populated by release.sh, not committed)
+npm/darwin-arm64/inngest
+npm/darwin-x64/inngest
+npm/linux-x64/inngest
+npm/linux-arm64/inngest
+npm/windows-x64/inngest.exe
+
+# npm lockfile (not a Node project in the traditional sense)
+node_modules/
+package-lock.json
 *.exe
 *.dll
 *.so
