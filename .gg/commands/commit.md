@@ -11,11 +11,19 @@ description: Run checks, commit, push, and create a versioned release tag that t
 
 ## CRITICAL: npm Token Requirements
 
-- The `NPM_TOKEN` repo secret **must** be a **Classic Automation** token (not Granular).
-- Classic Automation tokens bypass 2FA — without this, CI publish fails with OTP errors.
-- Granular tokens return 404 on PUT for new packages.
-- If expired or missing: https://www.npmjs.com/settings/jakeschepis/tokens → "Generate New Token" → **Classic** → **Automation**.
-- Token rotation is the **user's** responsibility — surface it as a blocker and stop; never attempt to work around it.
+- The `NPM_TOKEN` secret is a single **Granular Access Token** shared across all
+  `@coastal-programs` CLI repos (`inggest-cli`, `notion-cli`, `sageo-cli`).
+- It must be configured as: **Packages and scopes = Read and write**, scope
+  **`@coastal-programs`**, **Bypass 2FA = on**, **no IP range restriction**.
+- A `404 Not Found` on `PUT` during publish means the token lacks **write**
+  scope on `@coastal-programs` — fix the token's permission, NOT `--access`.
+- A `403 Forbidden` means the secret is missing/expired in the repo.
+- npm no longer offers "Classic" tokens — Granular with the scope above is the
+  supported setup. A correctly-scoped Granular token publishes fine.
+- Token rotation is the **user's** responsibility — surface it as a blocker and
+  stop; never attempt to work around it. Never paste a token into chat or a file.
+- Set the secret across all three repos at once:
+  `gh secret set NPM_TOKEN --org Coastal-Programs --repos inggest-cli,notion-cli,sageo-cli`
 
 ## Autonomy
 
@@ -40,7 +48,7 @@ Only stop and ask the user when:
 Run ALL checks first. Fix every error before continuing.
 
 ```bash
-go vet ./...
+make check          # fmt-check + vet + lint
 go test -race ./...
 ```
 
@@ -182,22 +190,40 @@ Pushing the tag triggers `.github/workflows/release.yml`, which:
 4. Publishes the root `@coastal-programs/inggest` wrapper package
 5. Creates a GitHub Release with `dist/*` artefacts and CHANGELOG notes
 
+### If the release run FAILS
+
+The tag is already consumed and npm rejects re-publishing the same version.
+Recover by shipping the next number — do NOT reuse the tag:
+
+```bash
+git tag -d "v${NEXT_VERSION}"                       # delete local tag
+git push origin ":refs/tags/v${NEXT_VERSION}"       # delete remote tag
+```
+
+Then fix the root cause (usually the `NPM_TOKEN` secret), re-run Step 5
+onward to bump to the next `0.2.<N>`, and tag again.
+
 ---
 
 ## Step 8 — Verify (after CI completes)
 
-```bash
-# Check CI
-gh run list --limit 3
+The **CI release run is the authoritative source of truth** — not `npm view`.
 
-# Confirm npm versions
-npm view @coastal-programs/inggest version
-npm view @coastal-programs/inggest-darwin-arm64 version
-npm view @coastal-programs/inggest-linux-x64 version
+```bash
+# Watch the release run to completion
+gh run watch "$(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+
+# Confirm each publish step succeeded (look for "+ @coastal-programs/...@<version>")
+gh run view <run-id> --json jobs --jq '.jobs[].steps[] | "\(.conclusion)\t\(.name)"'
 
 # Confirm GitHub Release
 gh release view "v${NEXT_VERSION}"
 ```
+
+> **Note:** `npm view @coastal-programs/inggest version` often returns `E404`
+> for several minutes after a successful publish — private/restricted packages
+> lag in npm's read cache. A 404 from `npm view` right after a green CI run is
+> NOT a failure. Trust the CI publish log (`+ @coastal-programs/...@<version>`).
 
 ---
 
@@ -205,9 +231,10 @@ gh release view "v${NEXT_VERSION}"
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| CI `npm publish` → 404 on PUT | Granular token + new package | Use Classic Automation token |
-| CI `npm publish` → 403 Forbidden | Token missing or wrong scope | Update `NPM_TOKEN` secret in repo settings |
-| CI `npm publish` → OTP required | Token doesn't bypass 2FA | Create new Classic Automation token with "Bypass 2FA" |
-| Version mismatch after install | A platform `package.json` not bumped | Rerun `./scripts/bump-version.sh X.Y.Z` |
-| `NPM_TOKEN` secret expired | Old token | Regenerate at npmjs.com → update GitHub secret |
+| CI `npm publish` → 404 on PUT | Token lacks write scope on `@coastal-programs` | Regenerate Granular token with Packages = Read and write, scope `@coastal-programs` |
+| CI `npm publish` → 403 Forbidden | `NPM_TOKEN` secret missing or expired | Re-set the secret across all three repos via `gh secret set` |
+| CI `npm publish` → OTP required | Token's "Bypass 2FA" not enabled | Regenerate Granular token with Bypass 2FA on |
+| `npm view` returns 404 after green CI | Private-package read-cache lag | Not a failure — trust the CI publish log; recheck in a few minutes |
+| Version mismatch after install | A platform `package.json` not bumped | Rerun `./scripts/bump-version.sh 0.2.<N>` |
 | Release notes blank | CHANGELOG heading format wrong | Must be exactly `## [X.Y.Z] - YYYY-MM-DD` |
+| Release run failed, tag stuck | Tag consumed, npm rejects re-publish | Delete the tag (see Step 7), bump to next `0.2.<N>`, re-tag |
