@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.21] - 2026-05-21
+
+### Added
+- `make fix` (gofmt -w + golangci-lint --fix), `make fmt-check`, and `make hooks` targets
+- `lefthook.yml` with opt-in pre-commit (gofmt + go vet) and pre-push test gate
+- `.editorconfig` and `AGENTS.md` for consistent editor and agent conventions
+- Coverage summary step (`go tool cover -func`) in the CI test workflow
+
+### Changed
+- `make check` is now a non-mutating gate (fmt-check + vet + lint)
+- `client_test.go` retry tests use `atomic.Int64` typed counters
+
 ## [0.2.2] - 2026-05-06
 
 ### Fixed
