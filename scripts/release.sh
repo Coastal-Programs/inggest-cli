@@ -1,13 +1,28 @@
 #!/usr/bin/env bash
+# release.sh <version>
+# Cross-platform release builder. Accepts either a v-prefixed tag
+# ("v0.2.23") or a bare semver ("0.2.23"); the v-prefixed form is the
+# canonical value embedded in the binary via -X main.version.
 set -euo pipefail
 
-VERSION="${1:-dev}"
+RAW_VERSION="${1:-}"
 BINARY="inngest"
 CMD="./cmd/inngest"
 DIST="./dist"
 
-LDFLAGS="-s -w \
-  -X main.version=${VERSION}"
+# Normalise the input tag into canonical forms.
+if [[ -z "${RAW_VERSION}" || "${RAW_VERSION}" == "dev" ]]; then
+  echo "Error: release version is required and must not be 'dev' (got '${RAW_VERSION}')" >&2
+  echo "Usage: $0 <version>   e.g. $0 v0.2.23" >&2
+  exit 1
+fi
+
+VERSION_NUM="${RAW_VERSION#v}"          # bare semver, e.g. 0.2.23
+VERSION="v${VERSION_NUM}"              # canonical v-prefixed, embedded in binary
+
+# Single-line ldflags string — no embedded newline. A backslash-newline
+# inside the quoted value embeds a literal newline and is fragile.
+LDFLAGS="-s -w -X main.version=${VERSION}"
 
 mkdir -p "${DIST}"
 
@@ -32,6 +47,11 @@ npm_dir() {
     *) echo "" ;;
   esac
 }
+
+# Host platform — the only build that can be executed on this runner.
+HOST_GOOS="$(go env GOOS)"
+HOST_GOARCH="$(go env GOARCH)"
+HOST_VERIFIED=""
 
 for PLATFORM in "${PLATFORMS[@]}"; do
   GOOS="${PLATFORM%/*}"
@@ -59,6 +79,22 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     fi
   fi
 
+  # Verify version injection by running the host-platform binary. All
+  # platforms share build flags, so a correct host build proves the
+  # ldflag wiring for the cross-compiled binaries too.
+  if [[ "${GOOS}" == "${HOST_GOOS}" && "${GOOS}/${GOARCH}" == "${HOST_GOOS}/${HOST_GOARCH}" ]]; then
+    echo "Verifying version injection on host (${HOST_GOOS}/${HOST_GOARCH})..."
+    REPORTED="$("${OUTPUT}" version -o json | grep -o '"version"[^,}]*' | sed 's/.*: *"\(.*\)".*/\1/')"
+    if [[ "${REPORTED}" != "${VERSION}" ]]; then
+      echo "Error: built binary reports version '${REPORTED}', expected '${VERSION}'" >&2
+      echo "The -X main.version ldflag was not applied correctly; aborting release." >&2
+      rm "${OUTPUT}"
+      exit 1
+    fi
+    echo "Version injection OK: ${REPORTED}"
+    HOST_VERIFIED="yes"
+  fi
+
   if [ "${GOOS}" = "windows" ]; then
     zip -j "${ARCHIVE}" "${OUTPUT}"
   else
@@ -66,6 +102,12 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   fi
   rm "${OUTPUT}"
 done
+
+if [[ -z "${HOST_VERIFIED}" ]]; then
+  echo "Error: host platform ${HOST_GOOS}/${HOST_GOARCH} is not in PLATFORMS;" >&2
+  echo "version injection could not be verified. Aborting release." >&2
+  exit 1
+fi
 
 echo "Generating checksums..."
 cd "${DIST}"

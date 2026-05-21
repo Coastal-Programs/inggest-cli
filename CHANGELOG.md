@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.23] - 2026-05-21
+
+### Fixed
+- Release tooling: the published binary reported `version: "dev"` because
+  `scripts/release.sh` and the `Makefile` built `LDFLAGS` with a fragile
+  backslash-newline inside a quoted string. The `-X main.version` ldflag is
+  now a single-line string, so the real release version is embedded.
+- `scripts/release.sh` aborts on an empty or `dev` version and verifies
+  version injection by running the freshly built host binary.
+- CI `release.yml` adds a "Verify version injection" step that fails the
+  job before publishing if the built binary reports a `dev`/mismatched
+  version.
+- Integration test `TestBinary_Version` now builds with an explicit
+  `-ldflags` and asserts the reported version equals the injected value.
+
 ## [0.2.22] - 2026-05-21
 
 ### Added

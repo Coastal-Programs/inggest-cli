@@ -62,6 +62,21 @@ jobs:
           chmod +x scripts/release.sh
           ./scripts/release.sh ${{ github.ref_name }}
 
+      - name: Verify version injection
+        run: |
+          VERSION="${{ github.ref_name }}"
+          BINARY="dist/inngest-${VERSION}-linux-amd64"
+          ARCHIVE="dist/inngest-cli-${VERSION}-linux-amd64.tar.gz"
+          tar -xzf "${ARCHIVE}" -C dist
+          REPORTED=$("${BINARY}" version -o json | node -e \
+            "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))")
+          echo "Built binary reports version: ${REPORTED}"
+          if [ "${REPORTED}" != "${VERSION}" ]; then
+            echo "Error: version injection failed — binary reports '${REPORTED}', expected '${VERSION}'" >&2
+            exit 1
+          fi
+          rm "${BINARY}"
+
       - name: Publish platform sub-packages to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

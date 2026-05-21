@@ -15,6 +15,11 @@ import (
 // binaryPath is the path to the compiled inngest binary, set in TestMain.
 var binaryPath string
 
+// injectedVersion is the version stamped into the test binary via -ldflags.
+// TestBinary_Version asserts the binary reports exactly this value, making
+// the -X main.version ldflag path a tested contract.
+const injectedVersion = "test-integration-version"
+
 func TestMain(m *testing.M) {
 	// Build the binary once for all integration tests.
 	tmpDir, err := os.MkdirTemp("", "inngest-integration-*")
@@ -24,7 +29,10 @@ func TestMain(m *testing.M) {
 	}
 	binaryPath = filepath.Join(tmpDir, "inngest")
 
-	cmd := exec.Command("go", "build", "-o", binaryPath, "github.com/Coastal-Programs/inggest-cli/cmd/inngest")
+	cmd := exec.Command("go", "build",
+		"-ldflags", "-X main.version="+injectedVersion,
+		"-o", binaryPath,
+		"github.com/Coastal-Programs/inggest-cli/cmd/inngest")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -99,6 +107,10 @@ func TestBinary_Version(t *testing.T) {
 		if _, ok := result[key]; !ok {
 			t.Errorf("expected key %q in version output, got: %v", key, result)
 		}
+	}
+
+	if got := result["version"]; got != injectedVersion {
+		t.Errorf("expected version %q (injected via -ldflags), got %q", injectedVersion, got)
 	}
 }
 
