@@ -3,12 +3,35 @@ name: commit
 description: Run checks, commit, push, and create a versioned release tag that triggers npm publishing via CI
 ---
 
+## CRITICAL: This is a PRIVATE package
+
+- `@coastal-programs/inggest` and all platform sub-packages are **private/restricted** npm packages — that is what the paid npm plan is for.
+- **NEVER** change `npm publish --access restricted` to `--access public` in `.github/workflows/release.yml`. Publishing public would leak a private CLI.
+- A `404 Not Found` on `PUT` during publish is **always a token problem**, never an `--access` problem. Do not "fix" it by changing access.
+
 ## CRITICAL: npm Token Requirements
 
 - The `NPM_TOKEN` repo secret **must** be a **Classic Automation** token (not Granular).
 - Classic Automation tokens bypass 2FA — without this, CI publish fails with OTP errors.
 - Granular tokens return 404 on PUT for new packages.
 - If expired or missing: https://www.npmjs.com/settings/jakeschepis/tokens → "Generate New Token" → **Classic** → **Automation**.
+- Token rotation is the **user's** responsibility — surface it as a blocker and stop; never attempt to work around it.
+
+## Autonomy
+
+Run this whole process end-to-end **without asking the user to confirm** any
+of the following — the decisions below are already made:
+
+- Whether to commit, bump, tag, and push — yes, always, once checks pass.
+- The version number — computed mechanically (see Step 5), never a judgement call.
+- Which files to stage — the changed files relevant to the work.
+
+Only stop and ask the user when:
+
+- A pre-flight check (`go vet`, `go test -race`) fails and the fix is non-obvious.
+- The working tree is not on `main`, or has unrelated uncommitted changes.
+- A genuine prerequisite is missing that only the user can supply (e.g. the
+  `NPM_TOKEN` secret needs rotating). Surface it as a blocker, do not guess.
 
 ---
 
@@ -92,15 +115,20 @@ Read current version:
 grep '"version"' package.json | head -1
 ```
 
-Decide the bump type:
-- **patch** (0.1.0 → 0.1.1): bug fixes only
-- **minor** (0.1.0 → 0.2.0): new features, backwards compatible
-- **major** (0.1.0 → 1.0.0): breaking changes
+**Versioning scheme (fixed — no judgement, no asking):**
 
-Compute `NEXT_VERSION` (e.g. `0.1.1`), then run the helper script:
+- The version is always `0.2.<N>` — the `0.2` prefix is permanent.
+- `<N>` is a single ever-incrementing integer. The next release after
+  `0.2.21` is `0.2.22`, then `0.2.23`, and so on.
+- There is **no** patch/minor/major decision. Just increment `<N>` by 1.
+
+Compute `NEXT_VERSION` by taking the current `0.2.<N>` and incrementing `<N>`:
 
 ```bash
-NEXT_VERSION="0.1.1"   # ← set this
+CURRENT=$(grep '"version"' package.json | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')
+N=$(echo "$CURRENT" | cut -d. -f3)
+NEXT_VERSION="0.2.$((N + 1))"
+echo "Bumping ${CURRENT} -> ${NEXT_VERSION}"
 ./scripts/bump-version.sh "${NEXT_VERSION}"
 ```
 
