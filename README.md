@@ -266,10 +266,18 @@ Built in Go with a focus on simplicity, reliability, and minimal dependencies.
 ## Contributing
 
 ```bash
-make check      # fmt + vet + test — run before every commit
+make check      # fmt-check + vet + lint — non-mutating, run before every commit
+make fmt-check  # verify formatting without modifying files
+make fmt        # auto-format Go source files
+make fix        # auto-fix formatting + lint issues
 make test       # run all tests with race detector
 make build      # build binary to ./build/inngest
+make hooks      # install git hooks via lefthook (opt-in)
 ```
+
+Git hooks are managed with [lefthook](https://lefthook.dev) and are **opt-in**.
+Run `make hooks` (after installing lefthook) to enable a `pre-commit` gate
+(`gofmt` + `go vet`) and a `pre-push` test run.
 
 ## License
 

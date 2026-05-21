@@ -245,9 +245,9 @@ func TestDevURL(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoRetry429WithRetryAfter(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -277,7 +277,7 @@ func TestDoRetry429WithRetryAfter(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
-	got := atomic.LoadInt64(&calls)
+	got := calls.Load()
 	if got != 2 {
 		t.Errorf("server received %d requests, want 2", got)
 	}
@@ -288,9 +288,9 @@ func TestDoRetry429WithRetryAfter(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoRetry429Exhausted(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&calls, 1)
+		calls.Add(1)
 		w.Header().Set("Retry-After", "0")
 		w.WriteHeader(http.StatusTooManyRequests)
 	}))
@@ -320,7 +320,7 @@ func TestDoRetry429Exhausted(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
 	}
 
-	got := atomic.LoadInt64(&calls)
+	got := calls.Load()
 	if got != int64(maxRetries) {
 		t.Errorf("server received %d requests, want %d", got, maxRetries)
 	}
@@ -331,9 +331,9 @@ func TestDoRetry429Exhausted(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoNoRetryOn200(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("success"))
 	}))
@@ -357,7 +357,7 @@ func TestDoNoRetryOn200(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
-	got := atomic.LoadInt64(&calls)
+	got := calls.Load()
 	if got != 1 {
 		t.Errorf("server received %d requests, want 1", got)
 	}
@@ -368,9 +368,9 @@ func TestDoNoRetryOn200(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoNoRetryOn500(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("server error"))
 	}))
@@ -394,7 +394,7 @@ func TestDoNoRetryOn500(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
 	}
 
-	got := atomic.LoadInt64(&calls)
+	got := calls.Load()
 	if got != 1 {
 		t.Errorf("server received %d requests, want 1", got)
 	}
@@ -406,10 +406,10 @@ func TestDoNoRetryOn500(t *testing.T) {
 
 func TestDoFallbackKeyOn401(t *testing.T) {
 	t.Run("retries with fallback key on 401", func(t *testing.T) {
-		var calls int64
+		var calls atomic.Int64
 		var lastAuth string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			n := atomic.AddInt64(&calls, 1)
+			n := calls.Add(1)
 			lastAuth = r.Header.Get("Authorization")
 			if n == 1 {
 				// First call with primary key — reject
@@ -444,7 +444,7 @@ func TestDoFallbackKeyOn401(t *testing.T) {
 			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 		}
 
-		got := atomic.LoadInt64(&calls)
+		got := calls.Load()
 		if got != 2 {
 			t.Errorf("server received %d requests, want 2", got)
 		}
@@ -455,9 +455,9 @@ func TestDoFallbackKeyOn401(t *testing.T) {
 	})
 
 	t.Run("no fallback retry when no fallback key set", func(t *testing.T) {
-		var calls int64
+		var calls atomic.Int64
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			atomic.AddInt64(&calls, 1)
+			calls.Add(1)
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte("unauthorized"))
 		}))
@@ -483,17 +483,17 @@ func TestDoFallbackKeyOn401(t *testing.T) {
 			t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
 		}
 
-		got := atomic.LoadInt64(&calls)
+		got := calls.Load()
 		if got != 1 {
 			t.Errorf("server received %d requests, want 1 (no fallback retry)", got)
 		}
 	})
 
 	t.Run("fallback with POST body is replayed correctly", func(t *testing.T) {
-		var calls int64
+		var calls atomic.Int64
 		var lastBody string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			n := atomic.AddInt64(&calls, 1)
+			n := calls.Add(1)
 			body, _ := io.ReadAll(r.Body)
 			lastBody = string(body)
 			if n == 1 {
@@ -538,10 +538,10 @@ func TestDoFallbackKeyOn401(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoRetry429PostBodyReplay(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	var bodies []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		body, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, string(body))
 		if n == 1 {
@@ -574,7 +574,7 @@ func TestDoRetry429PostBodyReplay(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
-	got := atomic.LoadInt64(&calls)
+	got := calls.Load()
 	if got != 2 {
 		t.Errorf("server received %d requests, want 2", got)
 	}
@@ -764,9 +764,9 @@ func TestDoReadBodyError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoFallbackRetryError(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			// First call returns 401 to trigger fallback.
 			w.WriteHeader(http.StatusUnauthorized)
@@ -795,9 +795,9 @@ func TestDoFallbackRetryError(t *testing.T) {
 
 	// Simpler approach: use a custom RoundTripper that fails on the second call.
 	origTransport := c.httpClient.Transport
-	callCount := int64(0)
+	var callCount atomic.Int64
 	c.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		n := atomic.AddInt64(&callCount, 1)
+		n := callCount.Add(1)
 		if n == 1 {
 			return origTransport.RoundTrip(r)
 		}
@@ -859,9 +859,9 @@ func TestDoWithRetry_TransportError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoWithRetry_RetryAfterHTTPDate(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			// Use an HTTP-date a tiny bit in the future.
 			futureDate := time.Now().Add(1 * time.Second).UTC().Format(http.TimeFormat)
@@ -891,7 +891,7 @@ func TestDoWithRetry_RetryAfterHTTPDate(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if got := atomic.LoadInt64(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("server received %d requests, want 2", got)
 	}
 }
@@ -901,9 +901,9 @@ func TestDoWithRetry_RetryAfterHTTPDate(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDoWithRetry_RetryAfterPastDate(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			// Use an HTTP-date in the past.
 			pastDate := time.Now().Add(-10 * time.Minute).UTC().Format(http.TimeFormat)
@@ -933,7 +933,7 @@ func TestDoWithRetry_RetryAfterPastDate(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if got := atomic.LoadInt64(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("server received %d requests, want 2", got)
 	}
 }
@@ -946,9 +946,9 @@ func TestDoWithRetry_EmptyRetryAfter(t *testing.T) {
 	// Empty Retry-After means the default backoff is used (attempt+1 seconds).
 	// To avoid slow tests, we test this with a short timeout — the first
 	// attempt's default wait is 1s, so we allow up to 3s total.
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			// Return 429 with no Retry-After header at all.
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -982,7 +982,7 @@ func TestDoWithRetry_EmptyRetryAfter(t *testing.T) {
 	if elapsed < 900*time.Millisecond {
 		t.Errorf("elapsed = %v, expected at least ~1s default backoff", elapsed)
 	}
-	if got := atomic.LoadInt64(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("server received %d requests, want 2", got)
 	}
 }
@@ -993,9 +993,9 @@ func TestDoWithRetry_EmptyRetryAfter(t *testing.T) {
 
 func TestDoWithRetry_UnparseableRetryAfter(t *testing.T) {
 	// Unparseable Retry-After falls through to default backoff.
-	var calls int64
+	var calls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		if n == 1 {
 			w.Header().Set("Retry-After", "invalid-stuff")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -1029,7 +1029,7 @@ func TestDoWithRetry_UnparseableRetryAfter(t *testing.T) {
 	if elapsed < 900*time.Millisecond {
 		t.Errorf("elapsed = %v, expected at least ~1s default backoff", elapsed)
 	}
-	if got := atomic.LoadInt64(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("server received %d requests, want 2", got)
 	}
 }
@@ -1184,10 +1184,10 @@ func TestDoHashedSigningKey(t *testing.T) {
 }
 
 func TestDoHashedFallbackKey(t *testing.T) {
-	var calls int64
+	var calls atomic.Int64
 	var lastAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&calls, 1)
+		n := calls.Add(1)
 		lastAuth = r.Header.Get("Authorization")
 		if n == 1 {
 			w.WriteHeader(http.StatusUnauthorized)

@@ -13,7 +13,8 @@ Built for AI agents, shell scripts, and CI/CD pipelines.
 ```bash
 make build      # → ./build/inngest
 make install    # → $GOPATH/bin
-make check      # fmt + vet + test — run before every commit
+make check      # fmt-check + vet + lint — run before every commit
+make fix        # gofmt -w + golangci-lint --fix (mutating auto-fixer)
 make clean      # remove build/dist artifacts
 ```
 

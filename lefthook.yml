@@ -1,0 +1,19 @@
+# lefthook — git hooks manager (https://lefthook.dev)
+# Install hooks locally with: make hooks  (or: lefthook install)
+# Hooks are opt-in; this config is committed but not auto-installed.
+# Skip a run with: LEFTHOOK=0 git commit
+
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      glob: "*.go"
+      run: make fmt-check
+    vet:
+      glob: "*.go"
+      run: go vet ./...
+
+pre-push:
+  commands:
+    test:
+      run: go test ./...

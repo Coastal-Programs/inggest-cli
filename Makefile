@@ -6,7 +6,7 @@ VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "d
 LDFLAGS := -ldflags "-s -w \
 	-X main.version=$(VERSION)"
 
-.PHONY: build install clean tidy run test lint fmt vet check help release
+.PHONY: build install clean tidy run test lint fmt fmt-check fix vet check hooks help release
 
 ## help: Show available make targets
 help:
@@ -39,9 +39,24 @@ test:
 coverage: test
 	go tool cover -html=coverage.out
 
-## fmt: Format all Go source files
+## fmt: Format all Go source files (mutating)
 fmt:
 	go fmt ./...
+
+## fmt-check: Verify formatting without modifying files
+fmt-check:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "Unformatted files (run 'make fmt'):"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
+## fix: Auto-fix formatting and lint issues (mutating)
+fix:
+	gofmt -w .
+	@which golangci-lint > /dev/null 2>&1 || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
+	golangci-lint run --fix ./...
 
 ## vet: Run go vet
 vet:
@@ -52,8 +67,13 @@ lint:
 	@which golangci-lint > /dev/null 2>&1 || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
 	golangci-lint run ./...
 
-## check: Run fmt, vet, and lint (pre-commit gate)
-check: fmt vet lint
+## check: Run fmt-check, vet, and lint (non-mutating pre-commit gate)
+check: fmt-check vet lint
+
+## hooks: Install git hooks via lefthook (opt-in)
+hooks:
+	@which lefthook > /dev/null 2>&1 || { echo "lefthook not found — install: https://lefthook.dev"; exit 1; }
+	lefthook install
 
 ## release: Build release binaries for all platforms
 release:
