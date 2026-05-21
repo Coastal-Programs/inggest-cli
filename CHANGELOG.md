@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.21] - 2026-05-21
+## [0.2.22] - 2026-05-21
 
 ### Added
 - `make fix` (gofmt -w + golangci-lint --fix), `make fmt-check`, and `make hooks` targets
