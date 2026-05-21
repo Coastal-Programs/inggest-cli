@@ -3,6 +3,8 @@
 # Cross-platform release builder. Accepts either a v-prefixed tag
 # ("v0.2.23") or a bare semver ("0.2.23"); the v-prefixed form is the
 # canonical value embedded in the binary via -X main.version.
+#
+# Requires: go, python3 (used to parse the binary's JSON version output).
 set -euo pipefail
 
 RAW_VERSION="${1:-}"
@@ -18,6 +20,14 @@ if [[ -z "${RAW_VERSION}" || "${RAW_VERSION}" == "dev" ]]; then
 fi
 
 VERSION_NUM="${RAW_VERSION#v}"          # bare semver, e.g. 0.2.23
+
+# Validate semver-ish (digits + dots, optional pre-release) — same regex as
+# scripts/bump-version.sh, so a malformed tag can't be embedded in a binary.
+if ! echo "${VERSION_NUM}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]'; then
+  echo "Error: version must be semver (e.g. 1.2.3), got '${RAW_VERSION}'" >&2
+  exit 1
+fi
+
 VERSION="v${VERSION_NUM}"              # canonical v-prefixed, embedded in binary
 
 # Single-line ldflags string — no embedded newline. A backslash-newline
@@ -84,7 +94,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   # ldflag wiring for the cross-compiled binaries too.
   if [[ "${GOOS}" == "${HOST_GOOS}" && "${GOOS}/${GOARCH}" == "${HOST_GOOS}/${HOST_GOARCH}" ]]; then
     echo "Verifying version injection on host (${HOST_GOOS}/${HOST_GOARCH})..."
-    REPORTED="$("${OUTPUT}" version -o json | grep -o '"version"[^,}]*' | sed 's/.*: *"\(.*\)".*/\1/')"
+    REPORTED="$("${OUTPUT}" version -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
     if [[ "${REPORTED}" != "${VERSION}" ]]; then
       echo "Error: built binary reports version '${REPORTED}', expected '${VERSION}'" >&2
       echo "The -X main.version ldflag was not applied correctly; aborting release." >&2

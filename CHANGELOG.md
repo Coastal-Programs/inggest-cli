@@ -32,6 +32,12 @@
 ### Fixed
 - Release workflow: publish scoped npm packages with `--access public` (was `--access restricted`, which requires a paid npm org plan and caused E402 errors)
 
+> **Historical note:** The `--access public` switch above applied to the 0.2.2 release only.
+> The release workflow was changed back to `--access restricted` shortly afterward, and the
+> npm org is now on a paid plan — so the scoped `@coastal-programs/*` packages are published
+> privately. See `.github/workflows/release.yml` and `.claude/rules/release.md` for the
+> current, intended behaviour.
+
 ## [0.2.1] - 2026-05-06
 
 ### Fixed
