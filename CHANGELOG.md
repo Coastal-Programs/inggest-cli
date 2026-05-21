@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.24] - 2026-05-21
+
+### Fixed
+- Release notes extraction in `release.yml` now matches the CHANGELOG
+  heading exactly, so tagging `v0.2.2` no longer prefix-matches the
+  `[0.2.23]` section and pulls the wrong notes.
+- `scripts/release.sh` validates that the release version is semver
+  before embedding it in the binary, mirroring `bump-version.sh`.
+- `scripts/release.sh` parses the built binary's JSON version output with
+  `python3` instead of a fragile `grep`/`sed` pipeline.
+
+### Changed
+- CI `test.yml` now runs the integration-tagged test suite
+  (`go test -tags integration ./internal/cli/...`), so the version
+  injection regression test runs on every push.
+
 ## [0.2.23] - 2026-05-21
 
 ### Fixed
