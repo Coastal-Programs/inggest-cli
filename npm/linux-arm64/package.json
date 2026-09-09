@@ -1,6 +1,6 @@
 {
   "name": "@coastal-programs/inggest-linux-arm64",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "The Linux ARM64 binary for the Inngest CLI.",
   "repository": {
     "type": "git",

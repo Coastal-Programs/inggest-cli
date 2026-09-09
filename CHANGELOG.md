@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.25] - 2026-09-09
+
+### Security
+- Bumped the `go` directive from 1.26.1 to 1.26.8, clearing 13 standard
+  library vulnerabilities reported by `govulncheck` in `crypto/tls`,
+  `crypto/x509` and `net/http`.
+
+### Changed
+- Updated `golang.org/x/term` 0.41.0 -> 0.46.0 and `golang.org/x/sys`
+  0.42.0 -> 0.48.0.
+
+### Added
+- Test coverage for previously untested paths: `truncateBody`, `doEvent`
+  header handling and body-read errors, `ListRuns` deduplication and limit
+  truncation, the `CancelRun` missing-envID hint, `Save` write failures,
+  `validateSigningKey` cloud-format errors, `printEnvDetail` timestamps,
+  `printFunctionsTable` status precedence, and metrics truncation flags.
+- `pkg/output`, `internal/inngest` and `internal/common/config` are now at
+  100% statement coverage.
+
 ## [0.2.24] - 2026-05-21
 
 ### Fixed
