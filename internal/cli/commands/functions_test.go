@@ -586,3 +586,52 @@ func TestFunctionsConfig_TextNoConfig(t *testing.T) {
 		t.Errorf("expected output to contain 'No configuration', got: %s", got)
 	}
 }
+
+// TestPrintFunctionsTable_StatusColumn covers the paused and archived status
+// branches. Archived takes precedence over paused.
+func TestPrintFunctionsTable_StatusColumn(t *testing.T) {
+	functions := []inngest.Function{
+		{
+			Name: "Active Func", Slug: "active-func",
+			Triggers: []inngest.FunctionTrigger{{Type: "event", Value: "user/signup"}},
+			App:      &inngest.App{Name: "My App"},
+		},
+		{
+			Name: "Paused Func", Slug: "paused-func", IsPaused: true,
+			Triggers: []inngest.FunctionTrigger{{Type: "cron", Value: "* * * * *"}},
+		},
+		{
+			Name: "Archived Func", Slug: "archived-func", IsArchived: true,
+		},
+		{
+			Name: "Both Func", Slug: "both-func", IsPaused: true, IsArchived: true,
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := printFunctionsTable(functions); err != nil {
+			t.Fatalf("printFunctionsTable returned error: %v", err)
+		}
+	})
+
+	// Count the trailing status column only — slugs also contain these words.
+	statuses := map[string]int{}
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		statuses[fields[len(fields)-1]]++
+	}
+
+	if statuses["active"] != 1 {
+		t.Errorf("expected 1 active row, got %d\n%s", statuses["active"], out)
+	}
+	// Archived wins over paused, so "Both Func" reports archived.
+	if statuses["paused"] != 1 {
+		t.Errorf("expected 1 paused row, got %d\n%s", statuses["paused"], out)
+	}
+	if statuses["archived"] != 2 {
+		t.Errorf("expected 2 archived rows (archived beats paused), got %d\n%s", statuses["archived"], out)
+	}
+}

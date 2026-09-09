@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
 func TestHealthCmdExists(t *testing.T) {
@@ -1073,5 +1075,69 @@ func TestBacklog_TableWithEntries(t *testing.T) {
 	}
 	if !strings.Contains(got, "Func B") {
 		t.Errorf("expected table output to contain 'Func B', got: %s", got)
+	}
+}
+
+// TestComputeMetrics_Truncated verifies the truncation flags are recorded when
+// the caller reports that results were cut short.
+func TestComputeMetrics_Truncated(t *testing.T) {
+	started := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	ended := started.Add(2 * time.Second)
+	runs := []inngest.FunctionRun{
+		{ID: "r1", Status: "COMPLETED", StartedAt: &started, EndedAt: &ended},
+		{ID: "r2", Status: "FAILED"},
+	}
+
+	result := computeMetrics(runs, "24h", true)
+
+	if v, ok := result["truncated"].(bool); !ok || !v {
+		t.Errorf("expected truncated=true, got %v", result["truncated"])
+	}
+	if v, ok := result["truncatedAt"].(int); !ok || v != 2 {
+		t.Errorf("expected truncatedAt=2, got %v", result["truncatedAt"])
+	}
+}
+
+// TestComputeMetrics_NotTruncated verifies the flags are absent otherwise.
+func TestComputeMetrics_NotTruncated(t *testing.T) {
+	result := computeMetrics([]inngest.FunctionRun{{ID: "r1", Status: "COMPLETED"}}, "24h", false)
+
+	if _, ok := result["truncated"]; ok {
+		t.Error("expected no truncated key when not truncated")
+	}
+	if _, ok := result["truncatedAt"]; ok {
+		t.Error("expected no truncatedAt key when not truncated")
+	}
+}
+
+// TestPrintMetricsText_TruncatedNote covers the truncation note branch.
+func TestPrintMetricsText_TruncatedNote(t *testing.T) {
+	started := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	ended := started.Add(time.Second)
+	runs := []inngest.FunctionRun{
+		{ID: "r1", Status: "COMPLETED", StartedAt: &started, EndedAt: &ended},
+	}
+
+	out := captureStdout(t, func() {
+		printMetricsText(computeMetrics(runs, "24h", true))
+	})
+
+	if !strings.Contains(out, "results truncated at 1 runs") {
+		t.Errorf("expected truncation note in output, got:\n%s", out)
+	}
+	// Duration percentiles should also render for the sampled run.
+	if !strings.Contains(out, "P50:") {
+		t.Errorf("expected duration percentiles in output, got:\n%s", out)
+	}
+}
+
+// TestPrintMetricsText_NoTruncationNote verifies the note is omitted otherwise.
+func TestPrintMetricsText_NoTruncationNote(t *testing.T) {
+	out := captureStdout(t, func() {
+		printMetricsText(computeMetrics([]inngest.FunctionRun{{ID: "r1", Status: "COMPLETED"}}, "1h", false))
+	})
+
+	if strings.Contains(out, "truncated") {
+		t.Errorf("expected no truncation note, got:\n%s", out)
 	}
 }

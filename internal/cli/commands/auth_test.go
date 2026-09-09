@@ -979,3 +979,46 @@ func TestDefaultReadSecret_Success(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "my-secret")
 	}
 }
+
+// TestValidateSigningKey_CloudFormatErrors covers the signkey-* prefixed
+// validation branches: malformed structure, odd-length hex, and invalid hex.
+func TestValidateSigningKey_CloudFormatErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		wantMsg string
+	}{
+		{
+			name:    "missing hex segment",
+			key:     "signkey-prod",
+			wantMsg: "format signkey-{env}-{hex}",
+		},
+		{
+			name:    "empty hex segment",
+			key:     "signkey-prod-",
+			wantMsg: "format signkey-{env}-{hex}",
+		},
+		{
+			name:    "odd length hex segment",
+			key:     "signkey-prod-abc",
+			wantMsg: "even length",
+		},
+		{
+			name:    "non-hex characters",
+			key:     "signkey-prod-zzzz",
+			wantMsg: "not valid hex",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSigningKey(tt.key)
+			if err == nil {
+				t.Fatalf("validateSigningKey(%q) = nil, want error", tt.key)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantMsg)
+			}
+		})
+	}
+}

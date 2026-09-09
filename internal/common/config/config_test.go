@@ -527,3 +527,26 @@ func TestSave_MarshalIndentError(t *testing.T) {
 		t.Errorf("error should mention 'encoding config', got: %v", err)
 	}
 }
+
+// --- Save: os.WriteFile error ---
+
+func TestSave_WriteFileError(t *testing.T) {
+	// Point the config path at a directory: MkdirAll succeeds (it already
+	// exists) but WriteFile cannot overwrite a directory.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "cli.json")
+	if err := os.Mkdir(p, 0o700); err != nil {
+		t.Fatalf("creating dir at config path: %v", err)
+	}
+	t.Setenv("INNGEST_CLI_CONFIG", p)
+	resetConfig(t)
+
+	cfg := &Config{SigningKey: "sk-test"}
+	err := cfg.Save()
+	if err == nil {
+		t.Fatal("expected error when config path is a directory")
+	}
+	if !strings.Contains(err.Error(), "writing config file") {
+		t.Errorf("error should mention 'writing config file', got: %v", err)
+	}
+}

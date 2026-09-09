@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
@@ -480,5 +481,46 @@ func TestPrintEnvDetail_Simple(t *testing.T) {
 	}
 	if !strings.Contains(got, "env-123") {
 		t.Errorf("expected output to contain 'env-123', got: %s", got)
+	}
+}
+
+// TestPrintEnvDetail_WithCreatedAt covers the optional CreatedAt branch.
+func TestPrintEnvDetail_WithCreatedAt(t *testing.T) {
+	created := time.Date(2024, 3, 15, 9, 30, 45, 0, time.UTC)
+	env := &inngest.Environment{
+		ID:                   "env-1",
+		Name:                 "Production",
+		Slug:                 "prod",
+		Type:                 "PRODUCTION",
+		IsAutoArchiveEnabled: true,
+		CreatedAt:            &created,
+	}
+
+	out := captureStdout(t, func() {
+		if err := printEnvDetail(env); err != nil {
+			t.Fatalf("printEnvDetail returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "2024-03-15 09:30:45") {
+		t.Errorf("expected formatted creation timestamp, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Production") {
+		t.Errorf("expected env name in output, got:\n%s", out)
+	}
+}
+
+// TestPrintEnvDetail_WithoutCreatedAt verifies the Created line is omitted.
+func TestPrintEnvDetail_WithoutCreatedAt(t *testing.T) {
+	env := &inngest.Environment{ID: "env-2", Name: "Staging", Slug: "staging", Type: "TEST"}
+
+	out := captureStdout(t, func() {
+		if err := printEnvDetail(env); err != nil {
+			t.Fatalf("printEnvDetail returned error: %v", err)
+		}
+	})
+
+	if strings.Contains(out, "Created:") {
+		t.Errorf("expected no Created line when CreatedAt is nil, got:\n%s", out)
 	}
 }

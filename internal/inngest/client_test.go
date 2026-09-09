@@ -1222,3 +1222,102 @@ func TestDoHashedFallbackKey(t *testing.T) {
 		t.Error("Fallback authorization should be hashed, not raw")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestDoEventReadBodyError
+// ---------------------------------------------------------------------------
+
+func TestDoEventReadBodyError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(ClientOptions{})
+	c.httpClient = srv.Client()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/e/key", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Body = io.NopCloser(errReader{})
+
+	resp, err := c.doEvent(req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading request body") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "reading request body")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestDoEventSetsEnvHeader
+// ---------------------------------------------------------------------------
+
+func TestDoEventSetsEnvHeader(t *testing.T) {
+	var gotEnv, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEnv = r.Header.Get("X-Inngest-Env")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(ClientOptions{SigningKey: "test-key", Env: testEnvProd, DevMode: false})
+	c.httpClient = srv.Client()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/e/key", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp, err := c.doEvent(req)
+	if err != nil {
+		t.Fatalf("doEvent() error: %v", err)
+	}
+	resp.Body.Close()
+
+	if gotEnv != testEnvProd {
+		t.Errorf("X-Inngest-Env = %q, want %q", gotEnv, testEnvProd)
+	}
+	// doEvent must never attach signing-key auth: the event endpoint
+	// authenticates via the event key in the URL path.
+	if gotAuth != "" {
+		t.Errorf("Authorization should be empty for event endpoint, got %q", gotAuth)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestDoEventSuppressesEnvHeaderInDevMode
+// ---------------------------------------------------------------------------
+
+func TestDoEventSuppressesEnvHeaderInDevMode(t *testing.T) {
+	var envPresent bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, envPresent = r.Header["X-Inngest-Env"]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(ClientOptions{Env: testEnvProd, DevMode: true})
+	c.httpClient = srv.Client()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/e/key", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp, err := c.doEvent(req)
+	if err != nil {
+		t.Fatalf("doEvent() error: %v", err)
+	}
+	resp.Body.Close()
+
+	if envPresent {
+		t.Error("X-Inngest-Env header should not be set in dev mode")
+	}
+}

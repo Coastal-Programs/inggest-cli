@@ -787,3 +787,123 @@ func TestGetRun_PostMethod(t *testing.T) {
 		t.Errorf("expected POST method, got %q", method)
 	}
 }
+
+// TestListRuns_DeduplicatesRunIDs verifies that the same function run
+// appearing under multiple event instances is only returned once.
+func TestListRuns_DeduplicatesRunIDs(t *testing.T) {
+	// The same run ID appears twice in the same event's functionRuns list.
+	response := eventsResponse(`{
+		"id": "run-dup",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	},
+	{
+		"id": "run-dup",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	},
+	{
+		"id": "run-unique",
+		"status": "RUNNING",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	}`)
+
+	srv := newTestServer(t, response, nil)
+	defer srv.Close()
+
+	client := NewClient(ClientOptions{
+		SigningKey: "test-key",
+		APIBaseURL: srv.URL,
+	})
+
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{First: 10})
+	if err != nil {
+		t.Fatalf("ListRuns returned error: %v", err)
+	}
+
+	if len(conn.Edges) != 2 {
+		t.Fatalf("expected 2 deduplicated edges, got %d", len(conn.Edges))
+	}
+	if conn.TotalCount != 2 {
+		t.Errorf("expected TotalCount 2, got %d", conn.TotalCount)
+	}
+
+	seen := map[string]int{}
+	for _, e := range conn.Edges {
+		seen[e.Node.ID]++
+	}
+	if seen["run-dup"] != 1 {
+		t.Errorf("expected 'run-dup' exactly once, got %d", seen["run-dup"])
+	}
+	if seen["run-unique"] != 1 {
+		t.Errorf("expected 'run-unique' exactly once, got %d", seen["run-unique"])
+	}
+}
+
+// TestListRuns_AppliesLimit verifies results are truncated to opts.First.
+func TestListRuns_AppliesLimit(t *testing.T) {
+	response := eventsResponse(`{
+		"id": "run-1",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	},
+	{
+		"id": "run-2",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	},
+	{
+		"id": "run-3",
+		"status": "COMPLETED",
+		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
+	}`)
+
+	srv := newTestServer(t, response, nil)
+	defer srv.Close()
+
+	client := NewClient(ClientOptions{
+		SigningKey: "test-key",
+		APIBaseURL: srv.URL,
+	})
+
+	conn, err := client.ListRuns(context.Background(), ListRunsOptions{First: 2})
+	if err != nil {
+		t.Fatalf("ListRuns returned error: %v", err)
+	}
+
+	if len(conn.Edges) != 2 {
+		t.Fatalf("expected results truncated to 2, got %d", len(conn.Edges))
+	}
+	if conn.TotalCount != 2 {
+		t.Errorf("expected TotalCount 2, got %d", conn.TotalCount)
+	}
+	if conn.Edges[0].Node.ID != testRunID1Events || conn.Edges[1].Node.ID != "run-2" {
+		t.Errorf("expected the first 2 runs in order, got %q and %q",
+			conn.Edges[0].Node.ID, conn.Edges[1].Node.ID)
+	}
+}
+
+// TestCancelRun_NoEnvIDErrorHint verifies that when no envID was supplied and
+// the API complains about envID, the error carries the actionable hint.
+func TestCancelRun_NoEnvIDErrorHint(t *testing.T) {
+	response := `{"data": null, "errors": [{"message": "envID is required for this operation"}]}`
+
+	srv := newTestServer(t, response, nil)
+	defer srv.Close()
+
+	client := NewClient(ClientOptions{
+		SigningKey: "test-key",
+		APIBaseURL: srv.URL,
+	})
+
+	_, err := client.CancelRun(context.Background(), "", testRunID1Events)
+	if err == nil {
+		t.Fatal("expected error when API reports missing envID")
+	}
+	if !strings.Contains(err.Error(), "--env-id") {
+		t.Errorf("expected hint mentioning '--env-id', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "INNGEST_ENV_ID") {
+		t.Errorf("expected hint mentioning 'INNGEST_ENV_ID', got: %v", err)
+	}
+}
