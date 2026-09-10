@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.3.0] - 2026-09-09
+
+### Fixed
+- Inngest Cloud commands were broken: the undocumented dashboard GraphQL API
+  the CLI depended on had drifted (`Cannot query field "recent" on type
+  "Event"`), so `runs list|get|watch`, `events list|get|types`, `metrics`
+  and `backlog` failed with a 422. All Cloud calls now use the documented
+  [REST API v2](https://api-docs.inngest.com) (runs, functions, apps, envs,
+  invoke, trace) and v1 (events).
+- A rejected credential returned `[]` with exit 0 (GraphQL answered 200 with
+  an empty workspace). Bad keys now surface as a 401 `APIError` and exit 4.
+- `runs watch` re-printed the same runs every tick (cursor never advanced).
+- `metrics`/`backlog` paginated on `hasNextPage`, which the old client never
+  set, so results were capped at 50 runs. They now follow real cursors and
+  filter server-side; `backlog` is one query instead of two.
+- `runs get` scanned up to 500 recent runs to find one ID; it is now a single
+  request. `functions get` no longer lists every function first only to
+  filter client-side by slug.
+- `env list` no longer degrades to a local-config fallback on auth errors.
+- `--dev` with cloud commands (`runs list --dev`) 422'd against the dev
+  server; every cloud command now routes to the dev server's API under `--dev`.
+- `events send --dev` without an event key posted to `/e/` and failed.
+- `dev invoke` / `functions invoke --dev` posted to a non-existent dev-server
+  route and got the UI's HTML back. They now use the dev server's
+  `invokeFunction` mutation (what the dev UI uses) and return the real run ID.
+- `events get --dev` and `events types --dev` work: the dev server lacks the
+  v2 event-runs and schema endpoints, so they use its GraphQL / recent events.
+- `-o text` map output had random key order.
+
+### Added
+- `runs trace <id>` — step-by-step trace tree (text) or full spans (JSON).
+- `functions invoke <slug-or-id> [--data|--data-file|stdin] [--idempotency-key] [--wait]`.
+- `apps list [--archived]`, `apps get <id>`, `apps sync <id> --url <serve-url>`.
+- `api <path> [-X METHOD] [--body|--body-file] [--raw]` — authenticated
+  passthrough to any REST endpoint (modelled on `gh api` / `inngest api`).
+- `runs list`: `--app`, `--until`, `--after` cursor, `--order`, `--time-field`,
+  `--output-data`; statuses/IDs accept comma-separated lists; `--since`
+  accepts RFC3339 timestamps. JSON output is `{runs, page{cursor,hasMore}}`.
+- `runs get --wait` / `--no-trace`; `metrics --app`; `events list --since|--after`;
+  `events types --schema`; `events send --id`; `--data-file` on send/invoke.
+- API-key auth: `auth login --api-key`, `INNGEST_API_KEY`, config `api_key`
+  (precedence: `INNGEST_API_KEY` > `INNGEST_SIGNING_KEY` > config). API keys
+  are sent as-is; signing keys stay hashed.
+- Global `--timeout` (default 30s). Ctrl+C / SIGTERM now cancel in-flight
+  requests and rate-limit backoff.
+- Distinct exit codes: 1 error, 2 interrupted, 4 credential rejected.
+- `auth status` and `health` validate the credential with an authenticated
+  call instead of an anonymous GraphQL probe.
+
+### Security
+- Credentials are never sent over plaintext `http://` to a non-loopback host
+  (`--api-url http://...` is refused); mirrors the official Inngest CLI.
+- Response bodies are capped at 25 MB; user-supplied path segments are
+  URL-escaped.
+
+### Changed
+- `runs cancel` no longer needs `--env-id`. `events send --async` (a no-op)
+  was removed. `Environment` output no longer includes `slug` /
+  `isAutoArchiveEnabled` (not exposed by the API); it gains `isArchived`.
+- `FunctionRun` JSON: `output` is embedded JSON instead of an encoded string;
+  adds `eventIDs`, `durationMs`, `appID`. Trace spans use the v2 field names
+  (`id`, `stepId`, `durationMs`, `children`).
+- The dev server v1.17 ignores the runs `status` filter; the CLI filters
+  client-side in `--dev` mode so `backlog --dev` and `--status` are correct.
+
 ## [0.2.25] - 2026-09-09
 
 ### Security
