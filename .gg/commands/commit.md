@@ -125,17 +125,22 @@ grep '"version"' package.json | head -1
 
 **Versioning scheme (fixed — no judgement, no asking):**
 
-- The version is always `0.2.<N>` — the `0.2` prefix is permanent.
-- `<N>` is a single ever-incrementing integer. The next release after
-  `0.2.21` is `0.2.22`, then `0.2.23`, and so on.
-- There is **no** patch/minor/major decision. Just increment `<N>` by 1.
+- Keep the current `MAJOR.MINOR` prefix exactly as it is and increment the
+  last number by 1. After `0.3.0` comes `0.3.1`, then `0.3.2`, and so on.
+- There is **no** patch/minor/major decision. Just increment the last number.
+- Never hardcode the prefix. It was pinned to `0.2` here once, which computed
+  `0.2.1` while the package was already on `0.3.0` — a downgrade that would
+  have moved npm's `latest` tag backwards. Derive the prefix from the file.
+- The new version must sort **above** the current one. If it does not, stop
+  and ask rather than publishing: npm versions can never be reused.
 
-Compute `NEXT_VERSION` by taking the current `0.2.<N>` and incrementing `<N>`:
+Compute `NEXT_VERSION` from the current version, preserving its prefix:
 
 ```bash
-CURRENT=$(grep '"version"' package.json | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')
-N=$(echo "$CURRENT" | cut -d. -f3)
-NEXT_VERSION="0.2.$((N + 1))"
+CURRENT=$(grep '"version"' package.json | head -1 | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+PREFIX="${CURRENT%.*}"   # e.g. 0.3
+N="${CURRENT##*.}"      # e.g. 0
+NEXT_VERSION="${PREFIX}.$((N + 1))"
 echo "Bumping ${CURRENT} -> ${NEXT_VERSION}"
 ./scripts/bump-version.sh "${NEXT_VERSION}"
 ```
@@ -201,7 +206,7 @@ git push origin ":refs/tags/v${NEXT_VERSION}"       # delete remote tag
 ```
 
 Then fix the root cause (usually the `NPM_TOKEN` secret), re-run Step 5
-onward to bump to the next `0.2.<N>`, and tag again.
+onward to bump to the next version, and tag again.
 
 ---
 
@@ -235,6 +240,6 @@ gh release view "v${NEXT_VERSION}"
 | CI `npm publish` → 403 Forbidden | `NPM_TOKEN` secret missing or expired | Re-set the secret across all three repos via `gh secret set` |
 | CI `npm publish` → OTP required | Token's "Bypass 2FA" not enabled | Regenerate Granular token with Bypass 2FA on |
 | `npm view` returns 404 after green CI | Private-package read-cache lag | Not a failure — trust the CI publish log; recheck in a few minutes |
-| Version mismatch after install | A platform `package.json` not bumped | Rerun `./scripts/bump-version.sh 0.2.<N>` |
+| Version mismatch after install | A platform `package.json` not bumped | Rerun `./scripts/bump-version.sh <version>` |
 | Release notes blank | CHANGELOG heading format wrong | Must be exactly `## [X.Y.Z] - YYYY-MM-DD` |
-| Release run failed, tag stuck | Tag consumed, npm rejects re-publish | Delete the tag (see Step 7), bump to next `0.2.<N>`, re-tag |
+| Release run failed, tag stuck | Tag consumed, npm rejects re-publish | Delete the tag (see Step 7), bump to the next version, re-tag |
