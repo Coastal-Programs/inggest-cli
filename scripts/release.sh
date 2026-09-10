@@ -105,11 +105,17 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     HOST_VERIFIED="yes"
   fi
 
+  # LICENSE and THIRD_PARTY_NOTICES.md ship inside every archive: the binary
+  # embeds Apache-2.0 and BSD-3-Clause modules whose terms require their
+  # notices to accompany a binary distribution.
+  cp LICENSE THIRD_PARTY_NOTICES.md "${DIST}/"
+
   if [ "${GOOS}" = "windows" ]; then
-    zip -j "${ARCHIVE}" "${OUTPUT}"
+    zip -j "${ARCHIVE}" "${OUTPUT}" "${DIST}/LICENSE" "${DIST}/THIRD_PARTY_NOTICES.md"
   else
-    tar -czf "${ARCHIVE}" -C "${DIST}" "$(basename "${OUTPUT}")"
+    tar -czf "${ARCHIVE}" -C "${DIST}" "$(basename "${OUTPUT}")" LICENSE THIRD_PARTY_NOTICES.md
   fi
+  rm -f "${DIST}/LICENSE" "${DIST}/THIRD_PARTY_NOTICES.md"
   rm "${OUTPUT}"
 done
 

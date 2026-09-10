@@ -85,12 +85,17 @@ jobs:
       # paid plan, so the restricted (private) publishes below succeed. If the org ever reverts
       # to a free plan, change both `npm publish` commands to `--access public` and set
       # `publishConfig.access` to "public" in all six package.json files.
+      # LICENSE and THIRD_PARTY_NOTICES.md are copied into every package before
+      # publishing. Each sub-package ships the statically linked binary, which
+      # embeds Apache-2.0 and BSD-3-Clause modules whose terms require their
+      # notices to accompany a binary distribution.
       - name: Publish platform sub-packages to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for dir in npm/darwin-arm64 npm/darwin-x64 npm/linux-x64 npm/linux-arm64 npm/windows-x64; do
             echo "Publishing ${dir}..."
+            cp LICENSE THIRD_PARTY_NOTICES.md "${dir}/"
             (cd "${dir}" && npm publish --access restricted)
           done
 

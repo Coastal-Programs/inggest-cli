@@ -16,7 +16,9 @@
   "files": [
     "bin/",
     "install.js",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "postinstall": "node install.js"

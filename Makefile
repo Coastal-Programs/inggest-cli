@@ -5,7 +5,7 @@ VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "d
 
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build install clean tidy run test lint fmt fmt-check fix vet check hooks help release
+.PHONY: build install clean tidy notices run test lint fmt fmt-check fix vet check hooks help release
 
 ## help: Show available make targets
 help:
@@ -29,6 +29,10 @@ run:
 tidy:
 	go mod tidy
 	go mod verify
+
+## notices: Regenerate THIRD_PARTY_NOTICES.md from the module cache
+notices:
+	@scripts/gen-notices.sh
 
 ## test: Run all tests with race detector and coverage
 test:
