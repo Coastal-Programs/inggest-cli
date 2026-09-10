@@ -7,20 +7,37 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
+	"strconv"
 	"time"
 )
 
-// ListEventsOptions configures the ListEvents query.
+// ListEventsOptions configures the events list query (GET /v1/events).
 type ListEventsOptions struct {
-	Name        string
-	RecentCount int // Number of recent event instances per type to fetch.
+	Name           string
+	Limit          int
+	Cursor         string     // internal ID of the last event from the previous page
+	ReceivedAfter  time.Time  // zero = unbounded
+	ReceivedBefore *time.Time // nil = unbounded
 }
 
-// SendEvent sends an event via the Event API (POST https://inn.gs/e/{eventKey}).
-// Returns the event IDs.
-func (c *Client) SendEvent(ctx context.Context, event any) ([]string, error) {
-	if c.eventKey == "" {
-		return nil, fmt.Errorf("inngest: event key is required to send events — set INNGEST_EVENT_KEY or use 'inngest auth login --event-key'")
+// EventInput is the body accepted by the v2 send endpoint (one event per call).
+type EventInput struct {
+	Name string `json:"name"`
+	Data any    `json:"data"`
+	ID   string `json:"id,omitempty"`
+	TS   int64  `json:"ts,omitempty"` // Unix milliseconds
+	User any    `json:"user,omitempty"`
+}
+
+// SendEvent sends an event and returns its ID(s). With an event key configured
+// (or in dev mode) it uses the Event API (POST https://inn.gs/e/{eventKey});
+// otherwise it falls back to the REST API (POST /v2/events), which is
+// authenticated by the signing/API key and intended for testing and debugging.
+func (c *Client) SendEvent(ctx context.Context, event EventInput) ([]string, error) {
+	if c.eventKey == "" && !c.devMode {
+		return c.sendEventREST(ctx, event)
 	}
 
 	body, err := json.Marshal(event)
@@ -34,17 +51,15 @@ func (c *Client) SendEvent(ctx context.Context, event any) ([]string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// The event ingestion endpoint (inn.gs/e/{eventKey}) authenticates via
-	// the event key in the URL path — not via a signing key Bearer token.
-	// Use doEvent instead of do to avoid injecting signing key auth headers
-	// which would cause 401 errors on the event ingestion endpoint.
+	// The Event API authenticates via the event key in the URL path, not a
+	// signing key Bearer token; doEvent skips the Authorization header.
 	resp, err := c.doEvent(req)
 	if err != nil {
 		return nil, fmt.Errorf("inngest: send event: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("inngest: read send event response: %w", err)
 	}
@@ -54,165 +69,134 @@ func (c *Client) SendEvent(ctx context.Context, event any) ([]string, error) {
 	}
 
 	var result struct {
-		IDs    []string `json:"ids"`
-		Status int      `json:"status"`
+		IDs []string `json:"ids"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("inngest: unmarshal send event response: %w", err)
 	}
-
 	return result.IDs, nil
 }
 
-// GetEventRuns fetches runs triggered by an event (GET /v1/events/{eventId}/runs).
+func (c *Client) sendEventREST(ctx context.Context, event EventInput) ([]string, error) {
+	var data struct {
+		EventID string `json:"eventId"`
+	}
+	if err := c.v2Post(ctx, "events", event, &data); err != nil {
+		return nil, fmt.Errorf("inngest: send event: %w", err)
+	}
+	return []string{data.EventID}, nil
+}
+
+// GetEventRuns fetches the runs triggered by an event (GET /v2/events/{eventId}/runs).
 func (c *Client) GetEventRuns(ctx context.Context, eventID string) ([]FunctionRun, error) {
-	var result struct {
-		Data []struct {
-			RunID      string     `json:"run_id"`
-			Status     string     `json:"status"`
-			FunctionID string     `json:"function_id"`
-			StartedAt  *time.Time `json:"started_at,omitempty"`
-			EndedAt    *time.Time `json:"ended_at,omitempty"`
-			Output     string     `json:"output,omitempty"`
-		} `json:"data"`
+	if c.devMode {
+		return c.devEventRuns(ctx, eventID)
 	}
-
-	if err := c.GetREST(ctx, fmt.Sprintf("events/%s/runs", eventID), &result); err != nil {
-		return nil, fmt.Errorf("inngest: get event runs: %w", err)
-	}
-
-	runs := make([]FunctionRun, len(result.Data))
-	for i, r := range result.Data {
-		runs[i] = FunctionRun{
-			ID:         r.RunID,
-			FunctionID: r.FunctionID,
-			Status:     r.Status,
-			StartedAt:  r.StartedAt,
-			EndedAt:    r.EndedAt,
-			Output:     r.Output,
+	q := url.Values{"includeOutput": {"true"}, "limit": {strconv.Itoa(v2ListPageSize)}}
+	runs := []FunctionRun{}
+	for range maxListPages {
+		var data []v2Run
+		page, err := c.v2Get(ctx, "events/"+url.PathEscape(eventID)+"/runs", q, &data)
+		if err != nil {
+			return nil, fmt.Errorf("inngest: get event runs: %w", err)
 		}
+		for _, r := range data {
+			runs = append(runs, r.toFunctionRun())
+		}
+		if page == nil || !page.HasMore || page.Cursor == "" {
+			return runs, nil
+		}
+		q.Set("cursor", page.Cursor)
 	}
-
 	return runs, nil
 }
 
-// ListEvents queries event types via the GraphQL `events` query.
-// The API returns event types (not individual instances). Use the `recent`
-// field on each type to access actual event instances.
-func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) (*EventTypesResult, error) {
-	recentCount := opts.RecentCount
-	if recentCount <= 0 {
-		recentCount = 5
-	}
-
-	query := `query ListEvents($name: String, $recentCount: Int!) {
-  events(query: {name: $name}) {
-    data {
-      name
-      description
-      firstSeen
-      usage { total }
-      workflows {
-        id
-        name
-        slug
-        triggers { type value condition }
-        app { id name externalID }
-      }
-      recent(count: $recentCount) {
-        id
-        occurredAt
-        receivedAt
-        name
-        event
-        version
-        functionRuns {
-          id
-          status
-          startedAt
-          endedAt
-          output
-          function { id name slug }
-        }
-      }
-    }
-    page {
-      page
-      perPage
-      totalItems
-      totalPages
-    }
-  }
-}`
-
-	variables := map[string]any{
-		"recentCount": recentCount,
-	}
+// ListEvents lists recent event instances (GET /v1/events), newest first.
+func (c *Client) ListEvents(ctx context.Context, opts ListEventsOptions) ([]Event, error) {
+	q := url.Values{}
 	if opts.Name != "" {
-		variables["name"] = opts.Name
+		q.Set("name", opts.Name)
+	}
+	if opts.Limit > 0 {
+		q.Set("limit", strconv.Itoa(opts.Limit))
+	}
+	if opts.Cursor != "" {
+		q.Set("cursor", opts.Cursor)
+	}
+	if !opts.ReceivedAfter.IsZero() {
+		q.Set("received_after", opts.ReceivedAfter.UTC().Format(time.RFC3339))
+	}
+	if opts.ReceivedBefore != nil {
+		q.Set("received_before", opts.ReceivedBefore.UTC().Format(time.RFC3339))
 	}
 
 	var result struct {
-		Events EventTypesResult `json:"events"`
+		Data []Event `json:"data"`
 	}
-
-	if err := c.ExecuteGraphQL(ctx, "ListEvents", query, variables, &result); err != nil {
+	if err := c.GetREST(ctx, "events?"+q.Encode(), &result); err != nil {
 		return nil, fmt.Errorf("inngest: list events: %w", err)
 	}
-
-	return &result.Events, nil
+	if result.Data == nil {
+		result.Data = []Event{}
+	}
+	return result.Data, nil
 }
 
-// GetEvent finds a single event instance by ID. It queries all event types
-// and searches their recent instances for a matching ID.
-func (c *Client) GetEvent(ctx context.Context, eventID string) (*ArchivedEvent, error) {
-	query := `query GetEvent($recentCount: Int!) {
-  events(query: {}) {
-    data {
-      name
-      recent(count: $recentCount) {
-        id
-        occurredAt
-        receivedAt
-        name
-        event
-        version
-        functionRuns {
-          id
-          status
-          startedAt
-          endedAt
-          output
-          function { id name slug }
-        }
-      }
-    }
-  }
-}`
-
-	variables := map[string]any{
-		"recentCount": 20,
-	}
-
+// GetEvent fetches a single event by its internal ID (GET /v1/events/{internalID}).
+func (c *Client) GetEvent(ctx context.Context, eventID string) (*Event, error) {
 	var result struct {
-		Events struct {
-			Data []struct {
-				Recent []ArchivedEvent `json:"recent"`
-			} `json:"data"`
-		} `json:"events"`
+		Data *Event `json:"data"`
 	}
-
-	if err := c.ExecuteGraphQL(ctx, "GetEvent", query, variables, &result); err != nil {
+	if err := c.GetREST(ctx, "events/"+url.PathEscape(eventID), &result); err != nil {
 		return nil, fmt.Errorf("inngest: get event: %w", err)
 	}
+	if result.Data == nil {
+		return nil, fmt.Errorf("inngest: event %s not found", eventID)
+	}
+	return result.Data, nil
+}
 
-	for _, evtType := range result.Events.Data {
-		for i := range evtType.Recent {
-			if evtType.Recent[i].ID == eventID {
-				return &evtType.Recent[i], nil
-			}
+// ListEventSchemas lists the event types seen in the environment with the inferred
+// shape of their data (GET /v2/insights/events/schemas). The dev server has no
+// schema endpoint, so there the names are derived from recent events.
+func (c *Client) ListEventSchemas(ctx context.Context) ([]EventSchema, error) {
+	if c.devMode {
+		return c.devEventTypes(ctx)
+	}
+	q := url.Values{"limit": {strconv.Itoa(v2ListPageSize)}}
+	schemas := []EventSchema{}
+	for range maxListPages {
+		var data []EventSchema
+		page, err := c.v2Get(ctx, "insights/events/schemas", q, &data)
+		if err != nil {
+			return nil, fmt.Errorf("inngest: list event schemas: %w", err)
+		}
+		schemas = append(schemas, data...)
+		if page == nil || !page.HasMore || page.Cursor == "" {
+			return schemas, nil
+		}
+		q.Set("cursor", page.Cursor)
+	}
+	return schemas, nil
+}
+
+// devEventTypeSample is how many recent dev-server events are scanned for names.
+const devEventTypeSample = 500
+
+// devEventTypes derives distinct event names from recent dev-server events.
+func (c *Client) devEventTypes(ctx context.Context) ([]EventSchema, error) {
+	events, err := c.ListEvents(ctx, ListEventsOptions{Limit: devEventTypeSample})
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	schemas := []EventSchema{}
+	for _, e := range events {
+		if !seen[e.Name] {
+			seen[e.Name] = true
+			schemas = append(schemas, EventSchema{Name: e.Name})
 		}
 	}
-
-	return nil, fmt.Errorf("inngest: event %s not found", eventID)
+	sort.Slice(schemas, func(i, j int) bool { return schemas[i].Name < schemas[j].Name })
+	return schemas, nil
 }

@@ -2,10 +2,10 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"os"
+	"net/http"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -13,858 +13,359 @@ import (
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
-const testRunID1 = "run-1"
+const (
+	v2RunJSON = `{"id":"01RUN1","status":"COMPLETED","app":{"id":"app-1","name":"my-app"},
+		"function":{"id":"fn-1","name":"My Fn","slug":"my-fn","app":{"id":"app-1"}},
+		"trigger":{"eventName":"user.signup","eventIds":["01EV"],"isBatch":false},
+		"queuedAt":"2024-01-01T00:00:00Z","startedAt":"2024-01-01T00:00:01Z","endedAt":"2024-01-01T00:00:02Z",
+		"durationMs":"1000","output":{"ok":true}}`
+	v2RunsPage  = `{"data":[` + v2RunJSON + `],"page":{"cursor":"next-1","hasMore":true,"limit":20}}`
+	v2TraceJSON = `{"data":{"runId":"01RUN1","rootSpan":{"id":"s1","name":"my-fn","status":"COMPLETED","stepOp":"RUN","durationMs":"12",
+		"children":[{"id":"s2","name":"step-a","status":"COMPLETED","stepOp":"RUN","durationMs":"5"}]}}}`
+)
+
+func runRuns(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewRunsCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	var err error
+	out := captureStdout(t, func() { err = cmd.Execute() })
+	return out, err
+}
 
 func TestRunsCmdHasSubcommands(t *testing.T) {
 	cmd := NewRunsCmd()
-
-	want := map[string]bool{
-		"list":   false,
-		"get":    false,
-		"cancel": false,
-		"replay": false,
-		"watch":  false,
-	}
-
-	for _, sub := range cmd.Commands() {
-		if _, ok := want[sub.Name()]; ok {
-			want[sub.Name()] = true
-		}
-	}
-
-	for name, found := range want {
-		if !found {
-			t.Errorf("runs command missing subcommand %q", name)
+	for _, name := range []string{"list", "get", "trace", "cancel", "replay", "watch"} {
+		if sub, _, err := cmd.Find([]string{name}); err != nil || sub == nil || sub.Name() != name {
+			t.Errorf("expected subcommand %q", name)
 		}
 	}
 }
 
-func TestRunsFromEdges(t *testing.T) {
-	edges := []inngest.RunEdge{
-		{
-			Node:   inngest.FunctionRun{ID: "run-1", Status: "COMPLETED"},
-			Cursor: "c1",
+func TestRunsList_QueryAndOutput(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			if got := q["status"]; len(got) != 2 || got[0] != "FAILED" || got[1] != "CANCELLED" {
+				t.Errorf("status = %v", got)
+			}
+			if q.Get("limit") != "5" || q.Get("cursor") != "c1" || q.Get("order") != "ASC" || q.Get("timeField") != "startedAt" {
+				t.Errorf("query = %s", r.URL.RawQuery)
+			}
+			if q["functionId"][0] != testFnID || q["appId"][0] != "app-1" || q.Get("includeOutput") != queryTrue {
+				t.Errorf("query = %s", r.URL.RawQuery)
+			}
+			if q.Get("from") == "" || q.Get("until") == "" {
+				t.Errorf("expected from/until, got %s", r.URL.RawQuery)
+			}
+			jsonOK(v2RunsPage)(w, r)
 		},
-		{
-			Node:   inngest.FunctionRun{ID: "run-2", Status: "FAILED"},
-			Cursor: "c2",
-		},
-	}
-
-	runs := runsFromEdges(edges)
-	if len(runs) != 2 {
-		t.Fatalf("expected 2 runs, got %d", len(runs))
-	}
-	if runs[0].ID != testRunID1 {
-		t.Errorf("expected run ID %q, got %q", testRunID1, runs[0].ID)
-	}
-	if runs[0].Status != "COMPLETED" {
-		t.Errorf("expected status %q, got %q", "COMPLETED", runs[0].Status)
-	}
-	if runs[1].ID != "run-2" {
-		t.Errorf("expected run ID %q, got %q", "run-2", runs[1].ID)
-	}
-	if runs[1].Status != "FAILED" {
-		t.Errorf("expected status %q, got %q", "FAILED", runs[1].Status)
-	}
-}
-
-func TestRunsFromEdgesEmpty(t *testing.T) {
-	runs := runsFromEdges([]inngest.RunEdge{})
-	if len(runs) != 0 {
-		t.Fatalf("expected 0 runs, got %d", len(runs))
-	}
-}
-
-func TestPrintRunsTable(t *testing.T) {
-	now := time.Now()
-	started := now.Add(-5 * time.Second)
-	ended := now
-	queued := now.Add(-10 * time.Second)
-
-	conn := &inngest.RunsConnection{
-		Edges: []inngest.RunEdge{
-			{
-				Node: inngest.FunctionRun{
-					ID:        "run-1",
-					Status:    "COMPLETED",
-					EventName: "app/user.created",
-					Function:  &inngest.Function{Name: "Handle User Created"},
-					StartedAt: &started,
-					EndedAt:   &ended,
-				},
-				Cursor: "c1",
-			},
-			{
-				Node: inngest.FunctionRun{
-					ID:        "run-2",
-					Status:    "RUNNING",
-					EventName: "app/order.placed",
-					Function:  &inngest.Function{Name: "Process Order"},
-					StartedAt: &started,
-				},
-				Cursor: "c2",
-			},
-			{
-				Node: inngest.FunctionRun{
-					ID:        "run-3",
-					Status:    "QUEUED",
-					EventName: "app/email.send",
-					QueuedAt:  &queued,
-				},
-				Cursor: "c3",
-			},
-		},
-		TotalCount: 3,
-	}
-
-	if err := printRunsTable(conn); err != nil {
-		t.Fatalf("printRunsTable returned error: %v", err)
-	}
-}
-
-func TestPrintRunsTableEmpty(t *testing.T) {
-	conn := &inngest.RunsConnection{
-		Edges: []inngest.RunEdge{},
-	}
-
-	if err := printRunsTable(conn); err != nil {
-		t.Fatalf("printRunsTable returned error: %v", err)
-	}
-}
-
-func TestPrintRunDetail(t *testing.T) {
-	now := time.Now()
-	queued := now.Add(-10 * time.Second)
-	started := now.Add(-5 * time.Second)
-	ended := now
-
-	run := &inngest.FunctionRun{
-		ID:           "run-detail-1",
-		Status:       "COMPLETED",
-		EventName:    "app/user.created",
-		IsBatch:      true,
-		CronSchedule: "*/5 * * * *",
-		Output:       `{"ok": true}`,
-		TraceID:      "trace-abc-123",
-		QueuedAt:     &queued,
-		StartedAt:    &started,
-		EndedAt:      &ended,
-		Function: &inngest.Function{
-			Name: "Handle User Created",
-			Slug: "handle-user-created",
-		},
-		App: &inngest.App{
-			Name:        "My App",
-			SDKLanguage: "typescript",
-			SDKVersion:  "3.0.0",
-		},
-		Trace: &inngest.RunTraceSpan{
-			Name:     "handle-user-created",
-			Status:   "COMPLETED",
-			Duration: 5000,
-			Children: []inngest.RunTraceSpan{
-				{
-					Name:     "validate-input",
-					Status:   "COMPLETED",
-					Duration: 100,
-					StepOp:   "run",
-				},
-				{
-					Name:     "send-welcome-email",
-					Status:   "COMPLETED",
-					Duration: 4800,
-					StepOp:   "run",
-				},
-			},
-		},
-	}
-
-	if err := printRunDetail(run); err != nil {
-		t.Fatalf("printRunDetail returned error: %v", err)
-	}
-}
-
-func TestPrintRunDetailMinimal(t *testing.T) {
-	run := &inngest.FunctionRun{
-		ID:     "run-minimal-1",
-		Status: "QUEUED",
-	}
-
-	if err := printRunDetail(run); err != nil {
-		t.Fatalf("printRunDetail returned error: %v", err)
-	}
-}
-
-func TestPrintTraceSpan(t *testing.T) {
-	span := &inngest.RunTraceSpan{
-		Name:     "step1",
-		Status:   "COMPLETED",
-		Duration: 150,
-		StepOp:   "run",
-		Children: []inngest.RunTraceSpan{
-			{
-				Name:     "child-step",
-				Status:   "COMPLETED",
-				Duration: 50,
-				StepOp:   "sleep",
-			},
-		},
-	}
-
-	// Verify no panic.
-	printTraceSpan(span, "  ")
-}
-
-// ---------- integration tests using newMockServer ----------
-
-func TestRunsList_Success(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]},{"name":"other/event","recent":[{"id":"evt-2","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"other/event","functionRuns":[{"id":"run-2","status":"RUNNING","startedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn-2","name":"Other Func","slug":"other-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
 	})
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(got), &result); err != nil {
-		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
-	}
-
-	runs, ok := result["runs"].([]any)
-	if !ok {
-		t.Fatalf("expected 'runs' to be an array, got %T", result["runs"])
-	}
-
-	ids := make(map[string]bool)
-	for _, r := range runs {
-		rm, _ := r.(map[string]any)
-		if id, ok := rm["id"]; ok {
-			ids[id.(string)] = true
-		}
-	}
-
-	if !ids[testRunID1] {
-		t.Error("expected output to contain run-1")
-	}
-	if !ids["run-2"] {
-		t.Error("expected output to contain run-2")
-	}
-}
-
-func TestRunsList_Table(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]},{"name":"other/event","recent":[{"id":"evt-2","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"other/event","functionRuns":[{"id":"run-2","status":"RUNNING","startedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn-2","name":"Other Func","slug":"other-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
 	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-	state.Output = "table"
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if !strings.Contains(got, testRunID1) {
-		t.Errorf("expected table output to contain %q, got: %s", testRunID1, got)
-	}
-	if !strings.Contains(got, "My Func") {
-		t.Errorf("expected table output to contain %q, got: %s", "My Func", got)
-	}
-}
-
-func TestRunsGet_Success(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{\"result\":\"ok\"}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
-	defer srv.Close()
-
 	setupCloudState(t, srv.URL)
 
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"get", "run-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(got), &result); err != nil {
-		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
-	}
-
-	if id, ok := result["id"]; !ok || id.(string) != testRunID1 {
-		t.Errorf("expected run ID %q, got %v", testRunID1, result["id"])
-	}
-	if status, ok := result["status"]; !ok || status.(string) != "COMPLETED" {
-		t.Errorf("expected status %q, got %v", "COMPLETED", result["status"])
-	}
-}
-
-func TestRunsCancel_Force(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"CancelRun": `{"data":{"cancelRun":{"id":"run-1","status":"CANCELLED"}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-1", "--force", "--env-id", "env-uuid-123"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(got), &result); err != nil {
-		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
-	}
-
-	if id, ok := result["id"]; !ok || id.(string) != testRunID1 {
-		t.Errorf("expected id %q, got %v", testRunID1, result["id"])
-	}
-	if status, ok := result["status"]; !ok || status.(string) != "CANCELLED" {
-		t.Errorf("expected status %q, got %v", "CANCELLED", result["status"])
-	}
-}
-
-func TestRunsReplay_Success(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"Rerun": `{"data":{"rerun":"new-run-id"}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"replay", "run-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(got), &result); err != nil {
-		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
-	}
-
-	if v, ok := result["originalRunID"]; !ok || v.(string) != testRunID1 {
-		t.Errorf("expected originalRunID %q, got %v", testRunID1, result["originalRunID"])
-	}
-	if v, ok := result["newRunID"]; !ok || v.(string) != "new-run-id" {
-		t.Errorf("expected newRunID %q, got %v", "new-run-id", result["newRunID"])
-	}
-}
-
-func TestRunsList_WithStatusFilter(t *testing.T) {
-	// Provide runs with different statuses; the client-side filter selects only COMPLETED and FAILED.
-	// The --function flag uses fn-id-1, so runs must have function with matching ID or slug.
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"` + time.Now().Add(-30*time.Minute).Format(time.RFC3339) + `","endedAt":"` + time.Now().Add(-29*time.Minute).Format(time.RFC3339) + `","output":"{}","function":{"id":"fn-id-1","name":"My Func","slug":"my-func"}},{"id":"run-2","status":"RUNNING","startedAt":"` + time.Now().Add(-30*time.Minute).Format(time.RFC3339) + `","output":"{}","function":{"id":"fn-id-1","name":"My Func","slug":"my-func"}},{"id":"run-3","status":"FAILED","startedAt":"` + time.Now().Add(-30*time.Minute).Format(time.RFC3339) + `","endedAt":"` + time.Now().Add(-29*time.Minute).Format(time.RFC3339) + `","output":"{}","function":{"id":"fn-id-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list", "--status", "Completed,Failed", "--function", "fn-id-1", "--since", "1h"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if !strings.Contains(got, testRunID1) {
-		t.Errorf("expected output to contain testRunID1, got: %s", got)
-	}
-	// RUNNING run should be filtered out
-	if strings.Contains(got, `"RUNNING"`) {
-		t.Errorf("expected RUNNING run to be filtered out, got: %s", got)
-	}
-}
-
-func TestRunsList_WithUntilFlag(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list", "--until", "1h"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if !strings.Contains(got, "totalCount") {
-		t.Errorf("expected output to contain totalCount, got: %s", got)
-	}
-}
-
-func TestRunsList_InvalidSince(t *testing.T) {
-	setupCloudState(t, "http://localhost:9999")
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list", "--since", "notaduration"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for invalid --since duration")
-	}
-	if !strings.Contains(err.Error(), "invalid --since duration") {
-		t.Errorf("expected error about invalid duration, got: %v", err)
-	}
-}
-
-func TestRunsList_InvalidUntil(t *testing.T) {
-	setupCloudState(t, "http://localhost:9999")
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list", "--until", "notaduration"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for invalid --until duration")
-	}
-	if !strings.Contains(err.Error(), "invalid --until duration") {
-		t.Errorf("expected error about invalid until duration, got: %v", err)
-	}
-}
-
-func TestRunsWatch_ContextCancel(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"watch", "--interval", "10ms"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	// The watch command uses signal.NotifyContext(context.Background(), os.Interrupt).
-	// We send ourselves SIGINT after a short delay.
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Execute()
-	}()
-
-	// Give the watch command time to do at least one poll, then send SIGINT.
-	time.Sleep(50 * time.Millisecond)
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch command didn't stop after SIGINT")
-	}
-}
-
-func TestRunsWatch_WithFilters(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"watch", "--interval", "10ms", "--status", "Completed,Failed", "--function", "fn-1"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Execute()
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch command didn't stop after SIGINT")
-	}
-}
-
-func TestRunsWatch_ErrorContinues(t *testing.T) {
-	// Server closes immediately → ListRuns will fail, but the watch loop should log and continue.
-	srv := newMockServer(t, nil, nil)
-	closedURL := srv.URL
-	srv.Close()
-
-	setupCloudState(t, closedURL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"watch", "--interval", "10ms"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Execute()
-	}()
-
-	// Let it poll and hit errors for a bit, then stop.
-	time.Sleep(50 * time.Millisecond)
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch command didn't stop after SIGINT")
-	}
-}
-
-func TestRunsCancel_NonForce_Yes(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"CancelRun": `{"data":{"cancelRun":{"id":"run-1","status":"CANCELLED"}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-
-	// Pipe "y\n" to stdin to simulate confirmation.
-	oldStdin := os.Stdin
-	r, w, _ := os.Pipe()
-	os.Stdin = r
-	go func() {
-		w.Write([]byte("y\n"))
-		w.Close()
-	}()
-	defer func() { os.Stdin = oldStdin }()
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-1", "--env-id", "env-uuid-123"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(got), &result); err != nil {
-		t.Fatalf("failed to parse JSON output: %v\nraw output: %s", err, got)
-	}
-
-	if result["id"] != testRunID1 {
-		t.Errorf("expected id %q, got %v", testRunID1, result["id"])
-	}
-	if result["status"] != "CANCELLED" {
-		t.Errorf("expected status %q, got %v", "CANCELLED", result["status"])
-	}
-}
-
-func TestRunsCancel_NonForce_No(t *testing.T) {
-	setupCloudState(t, "http://localhost:9999")
-
-	// Pipe "n\n" to stdin to decline.
-	oldStdin := os.Stdin
-	r, w, _ := os.Pipe()
-	os.Stdin = r
-	go func() {
-		w.Write([]byte("n\n"))
-		w.Close()
-	}()
-	defer func() { os.Stdin = oldStdin }()
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-1"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	// Should succeed (return nil) — cancellation was declined.
-	if err := cmd.Execute(); err != nil {
+	got, err := runRuns(t, "list", "--status", "failed,cancelled", "--limit", "5", "--after", "c1",
+		"--order", "asc", "--time-field", "startedAt", "--function", "fn-1", "--app", "app-1",
+		"--since", "2h", "--until", "2024-06-01T00:00:00Z", "--output-data")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
-
-func TestRunsReplay_Text(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"Rerun": `{"data":{"rerun":"new-run-id"}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-	state.Output = testOutputText
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"replay", "run-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if !strings.Contains(got, "new-run-id") {
-		t.Errorf("expected output to contain new-run-id, got: %s", got)
+	var page struct {
+		Runs []map[string]any `json:"runs"`
+		Page map[string]any   `json:"page"`
+	}
+	if err := json.Unmarshal([]byte(got), &page); err != nil {
+		t.Fatalf("parse output: %v\n%s", err, got)
+	}
+	if len(page.Runs) != 1 || page.Runs[0]["functionID"] != "fn-1" || page.Runs[0]["eventName"] != "user.signup" {
+		t.Errorf("runs = %v", page.Runs)
+	}
+	if page.Page["cursor"] != "next-1" || page.Page["hasMore"] != true {
+		t.Errorf("page = %v", page.Page)
 	}
 }
 
-func TestRunsCmd_BareHelp(t *testing.T) {
-	// Calling the parent command with no subcommand should print help (not error).
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
+func TestRunsList_Validation(t *testing.T) {
+	setupCloudState(t, "http://127.0.0.1:1")
+	for _, tc := range []struct{ args, want string }{
+		{"--limit 0", "--limit must be between"},
+		{"--limit 101", "--limit must be between"},
+		{"--since bogus", "invalid --since"},
+		{"--until bogus", "invalid --until"},
+	} {
+		_, err := runRuns(t, append([]string{"list"}, strings.Fields(tc.args)...)...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
 
-	err := cmd.Execute()
+func TestRunsList_TableAndAuthError(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{"/v2/runs": jsonOK(v2RunsPage)})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+	state.Output = testOutputTable
+	got, err := runRuns(t, "list")
 	if err != nil {
-		t.Fatalf("unexpected error from bare runs command: %v", err)
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"ID", "STATUS", "FUNCTION", "DURATION", "01RUN1", "My Fn", "1s"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("table missing %q:\n%s", want, got)
+		}
+	}
+
+	bad := newMockServer(t, nil, map[string]http.HandlerFunc{"/v2/runs": jsonStatus(http.StatusUnauthorized, v2Unauthorized)})
+	defer bad.Close()
+	setupCloudState(t, bad.URL)
+	if _, err := runRuns(t, "list"); !inngest.IsAuthError(err) {
+		t.Errorf("expected auth error, got %v", err)
 	}
 }
 
-func TestRunsGet_Text(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"test/event","functionRuns":[{"id":"run-1","status":"COMPLETED","startedAt":"2099-01-01T00:00:01Z","endedAt":"2099-01-01T00:00:02Z","output":"{\"result\":\"ok\"}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
-	defer srv.Close()
-
-	setupCloudState(t, srv.URL)
-	state.Output = testOutputText
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"get", "run-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+func TestRunsGet_WithTrace(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs/01RUN1": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("includeOutput") != queryTrue {
+				t.Errorf("expected includeOutput=true, got %s", r.URL.RawQuery)
+			}
+			jsonOK(`{"data":`+v2RunJSON+`}`)(w, r)
+		},
+		"/v2/runs/01RUN1/trace": jsonOK(v2TraceJSON),
 	})
-
-	if !strings.Contains(got, testRunID1) {
-		t.Errorf("expected text output to contain testRunID1, got: %s", got)
-	}
-	if !strings.Contains(got, "COMPLETED") {
-		t.Errorf("expected text output to contain COMPLETED, got: %s", got)
-	}
-}
-
-// ---------- error-path tests ----------
-
-func TestRunsList_ListRunsError(t *testing.T) {
-	// No "ListRuns" key → mock returns 400 → client returns error.
-	srv := newMockServer(t, map[string]string{}, nil)
 	defer srv.Close()
 	setupCloudState(t, srv.URL)
 
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"list"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when ListRuns fails")
+	got, err := runRuns(t, "get", "01RUN1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "listing runs") {
-		t.Errorf("expected error about listing runs, got: %v", err)
+	var run map[string]any
+	if err := json.Unmarshal([]byte(got), &run); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
 	}
-}
-
-func TestRunsGet_Error(t *testing.T) {
-	// No "ListRuns" key → mock returns 400 → GetRun (which calls ListRuns) returns error.
-	srv := newMockServer(t, map[string]string{}, nil)
-	defer srv.Close()
-	setupCloudState(t, srv.URL)
-
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"get", "run-nonexistent"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when GetRun fails")
+	trace, _ := run["trace"].(map[string]any)
+	if trace["id"] != "s1" || len(trace["children"].([]any)) != 1 {
+		t.Errorf("trace = %v", run["trace"])
 	}
-	if !strings.Contains(err.Error(), "getting run") {
-		t.Errorf("expected error about getting run, got: %v", err)
+	if out, _ := run["output"].(map[string]any); out["ok"] != true {
+		t.Errorf("output = %v", run["output"])
+	}
+
+	state.Output = testOutputText
+	got, err = runRuns(t, "get", "01RUN1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"Run ID:", "01RUN1", "Status:", "COMPLETED", "Function:", "Duration:", "1s", "Output:", "Trace:", "step-a"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("text output missing %q:\n%s", want, got)
+		}
 	}
 }
 
-func TestRunsCancel_Error(t *testing.T) {
-	// No "CancelRun" key → mock returns 400 → client returns error.
-	srv := newMockServer(t, map[string]string{}, nil)
+func TestRunsGet_TraceMissingAndNoTrace(t *testing.T) {
+	traceCalls := 0
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs/01RUN1": jsonOK(`{"data":{"id":"01RUN1","status":"QUEUED"}}`),
+		"/v2/runs/01RUN1/trace": func(w http.ResponseWriter, r *http.Request) {
+			traceCalls++
+			jsonStatus(http.StatusNotFound, `{"errors":[{"code":"not_found","message":"no trace"}]}`)(w, r)
+		},
+	})
 	defer srv.Close()
 	setupCloudState(t, srv.URL)
 
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"cancel", "run-nonexistent", "--force", "--env-id", "env-uuid-123"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when CancelRun fails")
+	got, err := runRuns(t, "get", "01RUN1")
+	if err != nil || strings.Contains(got, `"trace"`) {
+		t.Errorf("404 trace should be tolerated: err=%v out=%s", err, got)
 	}
-	if !strings.Contains(err.Error(), "cancelling run") {
-		t.Errorf("expected error about cancelling run, got: %v", err)
+	if _, err := runRuns(t, "get", "01RUN1", "--no-trace"); err != nil {
+		t.Errorf("--no-trace: %v", err)
+	}
+	if traceCalls != 1 {
+		t.Errorf("trace calls = %d, want 1 (--no-trace must skip it)", traceCalls)
 	}
 }
 
-func TestRunsReplay_Error(t *testing.T) {
-	// No "Rerun" key → mock returns 400 → client returns error.
-	srv := newMockServer(t, map[string]string{}, nil)
+func TestRunsGet_Wait(t *testing.T) {
+	calls := 0
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs/01RUN1": func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			status := "RUNNING"
+			if calls > 1 {
+				status = "COMPLETED"
+			}
+			jsonOK(`{"data":{"id":"01RUN1","status":"`+status+`"}}`)(w, r)
+		},
+		"/v2/runs/01RUN1/trace": jsonStatus(http.StatusNotFound, `{"errors":[]}`),
+	})
 	defer srv.Close()
 	setupCloudState(t, srv.URL)
 
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"replay", "run-nonexistent"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when RerunRun fails")
-	}
-	if !strings.Contains(err.Error(), "replaying run") {
-		t.Errorf("expected error about replaying run, got: %v", err)
+	got, err := runRuns(t, "get", "01RUN1", "--wait")
+	if err != nil || !strings.Contains(got, `"COMPLETED"`) || calls < 2 {
+		t.Errorf("--wait: err=%v calls=%d out=%s", err, calls, got)
 	}
 }
 
-func TestRunsWatch_CtxDonePath(t *testing.T) {
-	// Use a very long interval so the ticker never fires before SIGINT.
-	// This ensures the select picks ctx.Done() instead of ticker.C.
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
-	}, nil)
-	defer srv.Close()
+func TestWaitForRun_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	client := inngest.NewClient(inngest.ClientOptions{APIBaseURL: "http://127.0.0.1:1", SigningKey: "k"})
+	_, err := waitForRun(ctx, client, &inngest.FunctionRun{ID: "x", Status: "RUNNING"})
+	if err == nil || !strings.Contains(err.Error(), "waiting for run") {
+		t.Errorf("err = %v", err)
+	}
+}
 
+func TestRunsTrace(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{"/v2/runs/01RUN1/trace": jsonOK(v2TraceJSON)})
+	defer srv.Close()
 	setupCloudState(t, srv.URL)
 
+	got, err := runRuns(t, "trace", "01RUN1")
+	if err != nil || !strings.Contains(got, `"s2"`) {
+		t.Errorf("json trace: err=%v out=%s", err, got)
+	}
+	state.Output = testOutputText
+	got, err = runRuns(t, "trace", "01RUN1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "my-fn") || !strings.Contains(got, "step-a") || !strings.Contains(got, "12ms") {
+		t.Errorf("text trace:\n%s", got)
+	}
+
+	empty := newMockServer(t, nil, map[string]http.HandlerFunc{"/v2/runs/01RUN1/trace": jsonOK(`{"data":{"runId":"01RUN1"}}`)})
+	defer empty.Close()
+	setupCloudState(t, empty.URL)
+	if _, err := runRuns(t, "trace", "01RUN1"); err == nil || !strings.Contains(err.Error(), "no trace yet") {
+		t.Errorf("empty trace err = %v", err)
+	}
+}
+
+func TestRunsCancel(t *testing.T) {
+	cancelled := false
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs/01RUN1/cancel": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s", r.Method)
+			}
+			cancelled = true
+			jsonOK(`{"data":{"runId":"01RUN1"}}`)(w, r)
+		},
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	orig := isInteractiveFn
+	isInteractiveFn = func() bool { return false }
+	t.Cleanup(func() { isInteractiveFn = orig })
+
+	got, err := runRuns(t, "cancel", "01RUN1", "--force")
+	if err != nil || !cancelled || !strings.Contains(got, `"CANCELLED"`) {
+		t.Errorf("cancel --force: err=%v cancelled=%v out=%s", err, cancelled, got)
+	}
+}
+
+func TestRunsReplay(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs/01RUN1/rerun": jsonOK(`{"data":{"runId":"01NEW"}}`),
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	got, err := runRuns(t, "replay", "01RUN1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]string
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
+	}
+	if result["originalRunID"] != "01RUN1" || result["newRunID"] != "01NEW" {
+		t.Errorf("result = %v", result)
+	}
+}
+
+func TestRunsWatch_PrintsEachRunOnceUntilCancelled(t *testing.T) {
+	calls := 0
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if r.URL.Query().Get("order") != "ASC" {
+				t.Errorf("watch must poll ascending, got %s", r.URL.RawQuery)
+			}
+			jsonOK(`{"data":[`+v2RunJSON+`],"page":{"hasMore":false}}`)(w, r)
+		},
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	defer cancel()
 	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"watch", "--interval", "1h"})
+	cmd.SetArgs([]string{"watch", "--interval", "100ms"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Execute()
-	}()
-
-	// Give the goroutine time to start and enter the select, then SIGINT.
-	time.Sleep(50 * time.Millisecond)
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch command didn't stop after SIGINT")
+	var err error
+	got := captureStdout(t, func() { err = cmd.ExecuteContext(ctx) })
+	if err != nil {
+		t.Fatalf("watch should exit cleanly on cancel, got %v", err)
+	}
+	if calls < 2 {
+		t.Errorf("expected repeated polling, got %d calls", calls)
+	}
+	if n := strings.Count(got, "01RUN1"); n != 1 {
+		t.Errorf("run printed %d times, want exactly once:\n%s", n, got)
 	}
 }
 
-func TestRunsWatch_QueuedAtFallback(t *testing.T) {
-	// Return runs with QUEUED status (no startedAt) to cover the else-if branch.
-	srv := newMockServer(t, map[string]string{
-		"ListRuns": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","occurredAt":"2024-01-01T12:00:00Z","receivedAt":"2024-01-01T12:00:00Z","name":"test/event","functionRuns":[{"id":"run-q1","status":"QUEUED","output":"{}","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-	}, nil)
-	defer srv.Close()
+func TestRunHelpers(t *testing.T) {
+	if got := splitCSV(" a, ,b,"); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("splitCSV = %v", got)
+	}
+	if got := splitCSV(""); got != nil {
+		t.Errorf("splitCSV(\"\") = %v, want nil", got)
+	}
 
-	setupCloudState(t, srv.URL)
+	if ts, err := parseSince("since", "2024-01-02T03:04:05Z"); err != nil || ts.Year() != 2024 {
+		t.Errorf("parseSince RFC3339 = (%v, %v)", ts, err)
+	}
+	if ts, err := parseSince("since", "1h"); err != nil || time.Since(ts) < 59*time.Minute {
+		t.Errorf("parseSince duration = (%v, %v)", ts, err)
+	}
+	if _, err := parseSince("until", "nope"); err == nil || !strings.Contains(err.Error(), "--until") {
+		t.Errorf("parseSince invalid = %v", err)
+	}
 
-	cmd := NewRunsCmd()
-	cmd.SetArgs([]string{"watch", "--interval", "10ms"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Execute()
-	}()
-
-	// Give the watch command time to do at least one poll, then send SIGINT.
-	time.Sleep(50 * time.Millisecond)
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	start := time.Now().Add(-3 * time.Second)
+	end := start.Add(1500 * time.Millisecond)
+	cases := []struct {
+		name string
+		run  inngest.FunctionRun
+		want string
+	}{
+		{"durationMs wins", inngest.FunctionRun{DurationMs: 2500, StartedAt: &start, EndedAt: &end}, "2.5s"},
+		{"ended-started", inngest.FunctionRun{StartedAt: &start, EndedAt: &end}, "1.5s"},
+		{"none", inngest.FunctionRun{}, ""},
+	}
+	for _, tc := range cases {
+		if got := runDuration(tc.run); got != tc.want {
+			t.Errorf("%s: runDuration = %q, want %q", tc.name, got, tc.want)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch command didn't stop after SIGINT")
+	}
+	if got := runDuration(inngest.FunctionRun{StartedAt: &start}); !strings.HasSuffix(got, "…") {
+		t.Errorf("running duration = %q, want trailing ellipsis", got)
+	}
+	if got := runFunctionName(inngest.FunctionRun{FunctionID: "fn-1"}); got != "fn-1" {
+		t.Errorf("runFunctionName fallback = %q", got)
+	}
+	if got := runFunctionName(inngest.FunctionRun{FunctionID: "fn-1", Function: &inngest.Function{Name: "N"}}); got != "N" {
+		t.Errorf("runFunctionName = %q", got)
 	}
 }

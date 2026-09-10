@@ -74,10 +74,9 @@ func TestMaxPagesConstant(t *testing.T) {
 
 func TestHealth_AllPassed(t *testing.T) {
 	srv := newMockServer(t,
-		map[string]string{
-			"HealthCheck": `{"data":{"__typename":"Query"}}`,
-		},
-		map[string]http.HandlerFunc{
+		nil, map[string]http.HandlerFunc{
+			"/v2/envs":     jsonOK(`{"data":[]}`),
+			"/api/v2/envs": jsonOK(`{"data":[]}`),
 			"/dev": func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -126,10 +125,10 @@ func TestHealth_AllPassed(t *testing.T) {
 
 func TestHealth_NoSigningKey(t *testing.T) {
 	srv := newMockServer(t,
-		map[string]string{
-			"HealthCheck": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
+		nil, map[string]http.HandlerFunc{
+			"/v2/envs":     jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+			"/api/v2/envs": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
 		},
-		nil,
 	)
 	defer srv.Close()
 
@@ -157,8 +156,8 @@ func TestHealth_NoSigningKey(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, `"signing_key"`) {
-		t.Errorf("expected output to contain signing_key check, got: %s", got)
+	if !strings.Contains(got, `"api_key"`) {
+		t.Errorf("expected output to contain api_key check, got: %s", got)
 	}
 	if !strings.Contains(got, `"fail"`) {
 		t.Errorf("expected output to contain status 'fail', got: %s", got)
@@ -166,12 +165,9 @@ func TestHealth_NoSigningKey(t *testing.T) {
 }
 
 func TestMetrics_Success(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r2","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:02Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r3","status":"FAILED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn2","name":"fn2","slug":"fn2"}},{"id":"r4","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","function":{"id":"fn1","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}},{"id":"r2","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:02Z","function":{"id":"fn1","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}},{"id":"r3","status":"FAILED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","function":{"id":"fn2","name":"fn2","slug":"fn2"},"trigger":{"eventName":"evt"}},{"id":"r4","status":"RUNNING","function":{"id":"fn1","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -218,12 +214,9 @@ func TestMetrics_Success(t *testing.T) {
 }
 
 func TestBacklog_WithRuns(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn1","name":"Process Payment","slug":"fn1"},"trigger":{"eventName":"evt"}},{"id":"r2","status":"QUEUED","function":{"id":"fn1","name":"Process Payment","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -260,12 +253,9 @@ func TestBacklog_WithRuns(t *testing.T) {
 }
 
 func TestBacklog_Empty(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -298,12 +288,9 @@ func TestBacklog_Empty(t *testing.T) {
 }
 
 func TestMetrics_TextOutput(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","function":{"id":"fn1","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -338,12 +325,9 @@ func TestMetrics_TextOutput(t *testing.T) {
 }
 
 func TestMetrics_WithFunctionFilter(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn-123","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","function":{"id":"fn-123","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -400,10 +384,9 @@ func TestMetrics_InvalidSince(t *testing.T) {
 
 func TestHealth_TextOutput(t *testing.T) {
 	srv := newMockServer(t,
-		map[string]string{
-			"HealthCheck": `{"data":{"__typename":"Query"}}`,
-		},
-		map[string]http.HandlerFunc{
+		nil, map[string]http.HandlerFunc{
+			"/v2/envs":     jsonOK(`{"data":[]}`),
+			"/api/v2/envs": jsonOK(`{"data":[]}`),
 			"/dev": func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -436,8 +419,8 @@ func TestHealth_TextOutput(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "signing_key") {
-		t.Errorf("expected text output to contain 'signing_key', got: %s", got)
+	if !strings.Contains(got, "api_key") {
+		t.Errorf("expected text output to contain 'api_key', got: %s", got)
 	}
 	if !strings.Contains(got, "All checks passed") {
 		t.Errorf("expected text output to contain 'All checks passed', got: %s", got)
@@ -445,12 +428,9 @@ func TestHealth_TextOutput(t *testing.T) {
 }
 
 func TestBacklog_TextOutput(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[],"page":{"page":0,"totalPages":0}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -482,12 +462,9 @@ func TestBacklog_TextOutput(t *testing.T) {
 }
 
 func TestBacklog_TextWithEntries(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn1","name":"Process Payment","slug":"fn1"},"trigger":{"eventName":"evt"}},{"id":"r2","status":"QUEUED","function":{"id":"fn1","name":"Process Payment","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -519,12 +496,9 @@ func TestBacklog_TextWithEntries(t *testing.T) {
 }
 
 func TestBacklog_UnknownFunction(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}"}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -559,12 +533,9 @@ func TestBacklog_UnknownFunction(t *testing.T) {
 func TestMetrics_Truncated(t *testing.T) {
 	// With the events-based API, ListRuns always returns HasNextPage=false,
 	// so truncation is no longer triggered. This test verifies a single page is returned.
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","function":{"id":"fn1","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -602,12 +573,9 @@ func TestMetrics_Truncated(t *testing.T) {
 }
 
 func TestMetrics_TextTruncated(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"COMPLETED","startedAt":"2099-01-01T00:00:00Z","endedAt":"2099-01-01T00:00:01Z","function":{"id":"fn1","name":"fn1","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -643,12 +611,9 @@ func TestMetrics_TextTruncated(t *testing.T) {
 }
 
 func TestBacklog_TableOutput(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"Process Payment","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn1","name":"Process Payment","slug":"fn1"},"trigger":{"eventName":"evt"}},{"id":"r2","status":"QUEUED","function":{"id":"fn1","name":"Process Payment","slug":"fn1"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -688,10 +653,10 @@ func TestBacklog_TableOutput(t *testing.T) {
 func TestHealth_DevServerFail(t *testing.T) {
 	// API mock returns valid functions so the API check passes.
 	srv := newMockServer(t,
-		map[string]string{
-			"HealthCheck": `{"data":{"__typename":"Query"}}`,
+		nil, map[string]http.HandlerFunc{
+			"/v2/envs":     jsonOK(`{"data":[]}`),
+			"/api/v2/envs": jsonOK(`{"data":[]}`),
 		},
-		nil,
 	)
 	defer srv.Close()
 
@@ -816,12 +781,9 @@ func TestHealth_TextWithSkip(t *testing.T) {
 // TestMetrics_ListRunsError covers metrics.go:187-189 — ListRuns returning an
 // error in the metrics command.
 func TestMetrics_ListRunsError(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -854,12 +816,9 @@ func TestMetrics_ListRunsError(t *testing.T) {
 // TestBacklog_ListRunsError covers metrics.go:330-332 — ListRuns returning an
 // error in the backlog command.
 func TestBacklog_ListRunsError(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -895,12 +854,9 @@ func TestBacklog_ListRunsError(t *testing.T) {
 func TestBacklog_TruncatedJSON(t *testing.T) {
 	// hasNextPage:true forces pagination loop to hit maxPages limit.
 	// Two different functions so sort.Slice comparison executes.
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn-a","name":"Func A","slug":"fn-a"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn-b","name":"Func B","slug":"fn-b"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn-a","name":"Func A","slug":"fn-a"},"trigger":{"eventName":"evt"}},{"id":"r2","status":"QUEUED","function":{"id":"fn-b","name":"Func B","slug":"fn-b"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -947,12 +903,9 @@ func TestBacklog_TruncatedJSON(t *testing.T) {
 // TestBacklog_TruncatedText covers metrics.go:397-400 — truncated text output
 // for the backlog command.
 func TestBacklog_TruncatedText(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn-a","name":"Func A","slug":"fn-a"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn-a","name":"Func A","slug":"fn-a"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -987,13 +940,10 @@ func TestBacklog_TruncatedText(t *testing.T) {
 // TestMetrics_NoDurations covers metrics.go:236-238 — the percentile function
 // returns 0 when there are no duration samples (runs without startedAt/endedAt).
 func TestMetrics_NoDurations(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			// Runs without startedAt/endedAt → no duration samples.
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r2","status":"QUEUED","output":"{}","function":{"id":"fn1","name":"fn1","slug":"fn1"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	// Runs without startedAt/endedAt → no duration samples.
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn1","name":"fn1","slug":"fn1"}},{"id":"r2","status":"QUEUED","function":{"id":"fn1","name":"fn1","slug":"fn1"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -1039,12 +989,9 @@ func TestMetrics_NoDurations(t *testing.T) {
 // comparison at line 385-387 was uncovered due to only 1 unique function.
 // This test uses 2 functions so the comparator runs.
 func TestBacklog_TableWithEntries(t *testing.T) {
-	srv := newMockServer(t,
-		map[string]string{
-			"ListRuns": `{"data":{"events":{"data":[{"name":"evt","recent":[{"id":"e1","occurredAt":"2024-01-01T00:00:00Z","receivedAt":"2024-01-01T00:00:00Z","name":"evt","functionRuns":[{"id":"r1","status":"RUNNING","output":"{}","function":{"id":"fn-a","name":"Func A","slug":"fn-a"}},{"id":"r2","status":"RUNNING","output":"{}","function":{"id":"fn-b","name":"Func B","slug":"fn-b"}}]}]}],"page":{"page":1,"totalPages":1}}}}`,
-		},
-		nil,
-	)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn-a","name":"Func A","slug":"fn-a"},"trigger":{"eventName":"evt"}},{"id":"r2","status":"RUNNING","function":{"id":"fn-b","name":"Func B","slug":"fn-b"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -1139,5 +1086,91 @@ func TestPrintMetricsText_NoTruncationNote(t *testing.T) {
 
 	if strings.Contains(out, "truncated") {
 		t.Errorf("expected no truncation note, got:\n%s", out)
+	}
+}
+
+// TestMetrics_FollowsCursorAcrossPages proves paginateRuns really follows
+// page.cursor: two pages of runs must both be counted and the second request
+// must carry the cursor from the first response.
+func TestMetrics_FollowsCursorAcrossPages(t *testing.T) {
+	var cursors []string
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": func(w http.ResponseWriter, r *http.Request) {
+			cursors = append(cursors, r.URL.Query().Get("cursor"))
+			if r.URL.Query().Get("limit") != "100" {
+				t.Errorf("expected limit=100 for aggregation, got %q", r.URL.RawQuery)
+			}
+			if len(cursors) == 1 {
+				jsonOK(`{"data":[{"id":"r1","status":"COMPLETED","durationMs":"10"}],"page":{"cursor":"page-2","hasMore":true}}`)(w, r)
+				return
+			}
+			jsonOK(`{"data":[{"id":"r2","status":"FAILED","durationMs":"20"}],"page":{"hasMore":false}}`)(w, r)
+		},
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewMetricsCmd()
+	cmd.SetArgs([]string{"--since", "1h"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "page-2" {
+		t.Fatalf("cursors sent = %q, want [\"\" \"page-2\"]", cursors)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
+	}
+	if result["total"] != float64(2) || result["completed"] != float64(1) || result["failed"] != float64(1) {
+		t.Errorf("expected both pages aggregated, got %v", result)
+	}
+	if _, ok := result["truncated"]; ok {
+		t.Error("two pages must not be reported as truncated")
+	}
+}
+
+// TestMetrics_TruncatesAtMaxPages proves the safety cap: a server that always
+// reports more pages stops after maxPages requests, warns on stderr, and the
+// JSON output flags the result as truncated.
+func TestMetrics_TruncatesAtMaxPages(t *testing.T) {
+	requests := 0
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/runs": func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			jsonOK(`{"data":[{"id":"r","status":"COMPLETED"}],"page":{"cursor":"again","hasMore":true}}`)(w, r)
+		},
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewMetricsCmd()
+	cmd.SetArgs([]string{"--since", "1h"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if requests != maxPages {
+		t.Errorf("requests = %d, want exactly maxPages (%d)", requests, maxPages)
+	}
+	if !strings.Contains(stderr.String(), "pagination limit reached") {
+		t.Errorf("expected truncation warning on stderr, got %q", stderr.String())
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
+	}
+	if result["truncated"] != true || result["truncatedAt"] != float64(maxPages) {
+		t.Errorf("expected truncated=true truncatedAt=%d, got %v", maxPages, result)
 	}
 }

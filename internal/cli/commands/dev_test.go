@@ -78,7 +78,7 @@ func TestDevSendInvalidData(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON data")
 	}
-	if !strings.Contains(err.Error(), "invalid --data JSON") {
+	if !strings.Contains(err.Error(), "invalid JSON input") {
 		t.Errorf("expected error about invalid JSON, got: %v", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestDevInvokeInvalidData(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON data")
 	}
-	if !strings.Contains(err.Error(), "invalid --data JSON") {
+	if !strings.Contains(err.Error(), "invalid JSON input") {
 		t.Errorf("expected error about invalid JSON, got: %v", err)
 	}
 }
@@ -138,7 +138,7 @@ func TestDevRunsInvalidSince(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid --since duration")
 	}
-	if !strings.Contains(err.Error(), "invalid --since duration") {
+	if !strings.Contains(err.Error(), "invalid --since") {
 		t.Errorf("expected error about invalid duration, got: %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestDevStatus_Offline(t *testing.T) {
 
 func TestDevFunctions(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListFunctions": `{"data":{"functions":[{"id":"fn-1","name":"My Function","slug":"my-func","triggers":[{"type":"event","value":"test/event"}],"app":{"name":"test-app"}}]}}`,
+		"DevFunctions": `{"data":{"functions":[{"id":"fn-1","name":"My Function","slug":"my-func","triggers":[{"type":"EVENT","value":"test/event"}],"app":{"id":"app-1","name":"test-app"}}]}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -271,7 +271,7 @@ func TestDevFunctions(t *testing.T) {
 
 func TestDevRuns_Success(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"DevRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}}}],"totalCount":1}}}`,
+		"DevRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}}}],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -333,13 +333,11 @@ func TestDevSend_Success(t *testing.T) {
 }
 
 func TestDevInvoke_Success(t *testing.T) {
-	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
-		"/invoke/*": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":"run-id-1","status":200}`))
-		},
-	})
+	srv := newMockServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"fn-uuid-1","name":"My Func","slug":"my-func"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+		"DevRuns":      `{"data":{"runs":{"edges":[{"node":{"id":"run-id-1","status":"QUEUED","functionID":"fn-uuid-1"}}],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}`,
+	}, nil)
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -359,7 +357,7 @@ func TestDevInvoke_Success(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, `"event_id"`) {
+	if !strings.Contains(got, `"run_id"`) {
 		t.Errorf("expected output to contain event_id, got: %s", got)
 	}
 	if !strings.Contains(got, `"run-id-1"`) {
@@ -368,13 +366,11 @@ func TestDevInvoke_Success(t *testing.T) {
 }
 
 func TestDevInvoke_NoData(t *testing.T) {
-	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
-		"/invoke/*": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":"run-id-1","status":200}`))
-		},
-	})
+	srv := newMockServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"fn-uuid-1","name":"My Func","slug":"my-func"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+		"DevRuns":      `{"data":{"runs":{"edges":[{"node":{"id":"run-id-1","status":"QUEUED","functionID":"fn-uuid-1"}}],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}`,
+	}, nil)
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -394,7 +390,7 @@ func TestDevInvoke_NoData(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, `"event_id"`) {
+	if !strings.Contains(got, `"run_id"`) {
 		t.Errorf("expected output to contain event_id, got: %s", got)
 	}
 	if !strings.Contains(got, `"run-id-1"`) {
@@ -467,9 +463,9 @@ func TestDevSend_StdinInvalidJSON(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for invalid stdin JSON")
+		t.Fatal("expected error for invalid JSON on stdin")
 	}
-	if !strings.Contains(err.Error(), "invalid stdin JSON") {
+	if !strings.Contains(err.Error(), "invalid JSON input") {
 		t.Errorf("expected error about invalid stdin JSON, got: %v", err)
 	}
 }
@@ -529,9 +525,22 @@ func TestDevCmd_BareHelp(t *testing.T) {
 }
 
 func TestDevEvents_Success(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListDevEvents": `{"data":{"events":[{"id":"evt-1","name":"test/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":1},{"id":"evt-2","name":"other/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":0}]}}`,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": func(w http.ResponseWriter, r *http.Request) {
+			all := []map[string]any{
+				{"internal_id": "evt-1", "name": "test/event", "data": map[string]any{}, "received_at": "2024-01-01T00:00:00Z"},
+				{"internal_id": "evt-2", "name": "other/event", "data": map[string]any{}, "received_at": "2024-01-01T00:00:00Z"},
+			}
+			var out []map[string]any
+			for _, e := range all {
+				if n := r.URL.Query().Get("name"); n == "" || n == e["name"] {
+					out = append(out, e)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": out})
+		},
+	})
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -560,9 +569,22 @@ func TestDevEvents_Success(t *testing.T) {
 }
 
 func TestDevEvents_NameFilter(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListDevEvents": `{"data":{"events":[{"id":"evt-1","name":"test/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":1},{"id":"evt-2","name":"other/event","createdAt":"2024-01-01T00:00:00Z","status":"received","totalRuns":0}]}}`,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": func(w http.ResponseWriter, r *http.Request) {
+			all := []map[string]any{
+				{"internal_id": "evt-1", "name": "test/event", "data": map[string]any{}, "received_at": "2024-01-01T00:00:00Z"},
+				{"internal_id": "evt-2", "name": "other/event", "data": map[string]any{}, "received_at": "2024-01-01T00:00:00Z"},
+			}
+			var out []map[string]any
+			for _, e := range all {
+				if n := r.URL.Query().Get("name"); n == "" || n == e["name"] {
+					out = append(out, e)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": out})
+		},
+	})
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -595,19 +617,20 @@ func TestDevEvents_LimitFilter(t *testing.T) {
 	events := make([]map[string]any, 5)
 	for i := range 5 {
 		events[i] = map[string]any{
-			"id":        fmt.Sprintf("evt-%d", i+1),
-			"name":      fmt.Sprintf("event/%d", i+1),
-			"createdAt": "2024-01-01T00:00:00Z",
-			"status":    "received",
-			"totalRuns": 0,
+			"internal_id": fmt.Sprintf("evt-%d", i+1),
+			"name":        fmt.Sprintf("event/%d", i+1),
+			"received_at": "2024-01-01T00:00:00Z",
 		}
 	}
-	eventsJSON, _ := json.Marshal(events)
-	gqlResp := fmt.Sprintf(`{"data":{"events":%s}}`, string(eventsJSON))
-
-	srv := newMockServer(t, map[string]string{
-		"ListDevEvents": gqlResp,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("limit") != "2" {
+				t.Errorf("expected limit=2 query, got %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": events[:2]})
+		},
+	})
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -641,25 +664,11 @@ func TestDevEvents_LimitFilter(t *testing.T) {
 // Tests for uncovered error / branch paths
 // ---------------------------------------------------------------------------
 
-// dev.go:63 – GetDevInfo error path in newDevStatusCmd.
-// IsDevServerRunning and GetDevInfo both hit GET /dev. The first call (IsDevServerRunning)
-// must return 200 so the server is considered online. The second call (GetDevInfo)
-// must return invalid JSON so parsing fails.
+// GetDevInfo decode error path in newDevStatusCmd.
 func TestDevStatus_GetDevInfoError(t *testing.T) {
-	var callCount int
+	// Something is listening but it is not a dev server: must be an error, not "offline".
 	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
-		"/dev": func(w http.ResponseWriter, r *http.Request) {
-			callCount++
-			if callCount == 1 {
-				// IsDevServerRunning: just needs 200
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			// GetDevInfo: return invalid JSON to trigger unmarshal error
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`not-json`))
-		},
+		"/dev": jsonOK(`not-json`),
 	})
 	defer srv.Close()
 
@@ -685,7 +694,7 @@ func TestDevStatus_GetDevInfoError(t *testing.T) {
 // dev.go:110 – GraphQL error in newDevFunctionsCmd.
 func TestDevFunctions_GraphQLError(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"ListFunctions": `{"data":null,"errors":[{"message":"something went wrong"}]}`,
+		"DevFunctions": `{"data":null,"errors":[{"message":"something went wrong"}]}`,
 	}, nil)
 	defer srv.Close()
 
@@ -711,7 +720,7 @@ func TestDevFunctions_GraphQLError(t *testing.T) {
 // dev.go:162-167 – status and function filter branches in newDevRunsCmd.
 func TestDevRuns_StatusAndFunctionFilters(t *testing.T) {
 	srv := newMockServer(t, map[string]string{
-		"DevRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-filtered","status":"FAILED","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}}}],"totalCount":1}}}`,
+		"DevRuns": `{"data":{"runs":{"edges":[{"node":{"id":"run-filtered","status":"FAILED","eventName":"test/event","function":{"name":"My Func","slug":"my-func"}}}],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}`,
 	}, nil)
 	defer srv.Close()
 
@@ -822,12 +831,10 @@ func TestDevSend_SendDevEventError(t *testing.T) {
 
 // dev.go:285 – InvokeDevFunction error path in newDevInvokeCmd.
 func TestDevInvoke_InvokeDevFunctionError(t *testing.T) {
-	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
-		"/invoke/*": func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`internal server error`))
-		},
-	})
+	srv := newMockServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"fn-uuid-1","name":"My Func","slug":"my-func"}]}}`,
+		"DevInvoke":    `{"data":null,"errors":[{"message":"function has no app"}]}`,
+	}, nil)
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -851,9 +858,9 @@ func TestDevInvoke_InvokeDevFunctionError(t *testing.T) {
 
 // dev.go:327 – GraphQL error in newDevEventsCmd.
 func TestDevEvents_GraphQLError(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListDevEvents": `{"data":null,"errors":[{"message":"events query failed"}]}`,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": jsonStatus(http.StatusInternalServerError, `{"error":"events query failed"}`),
+	})
 	defer srv.Close()
 
 	state.DevServer = srv.URL
@@ -868,7 +875,7 @@ func TestDevEvents_GraphQLError(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when GraphQL returns errors for ListDevEvents")
+		t.Fatal("expected error when the events API fails")
 	}
 	if !strings.Contains(err.Error(), "querying events") {
 		t.Errorf("expected error about querying events, got: %v", err)

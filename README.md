@@ -77,26 +77,32 @@ inngest runs list --since 1h
 ### Authentication
 
 ```bash
-# Log in with signing key (interactive prompt or --signing-key flag)
+# Log in with an API key (recommended for CLI/CI/agents; Settings → API keys)
+inngest auth login --api-key <key>
+
+# ...or a signing key (interactive prompt or --signing-key flag)
 inngest auth login
 
-# Check current auth status
+# Check current auth status (validates the credential against the API)
 inngest auth status
 
 # Clear stored credentials
 inngest auth logout
 ```
 
+Credential precedence: `INNGEST_API_KEY` > `INNGEST_SIGNING_KEY` > config `api_key` > config `signing_key`.
+
 ### Functions
 
 | Command | Description |
 |---------|-------------|
 | `inngest functions list` | List all functions with triggers and config |
-| `inngest functions get <slug>` | Get detailed function info by slug |
-| `inngest functions config <slug>` | Show function configuration (concurrency, throttle, retry, etc.) |
+| `inngest functions get <slug-or-id>` | Get detailed function info |
+| `inngest functions config <slug-or-id>` | Show function configuration (concurrency, throttle, retry, etc.) |
+| `inngest functions invoke <slug-or-id>` | Invoke a function directly and get the run ID |
 
 ```bash
-# Filter by app
+# Filter by app name or ID
 inngest functions list --app my-app
 
 # Table view
@@ -104,56 +110,84 @@ inngest functions list --output table
 
 # Full config details
 inngest functions config my-app-process-order
+
+# Invoke with data and wait for the result
+inngest functions invoke my-app-process-order --data '{"orderId": "abc"}' --wait
 ```
 
 ### Runs
 
 | Command | Description |
 |---------|-------------|
-| `inngest runs list` | List recent function runs |
-| `inngest runs get <run-id>` | Get run details (status, function, timing) |
+| `inngest runs list` | List function runs (server-side filters, cursor pagination) |
+| `inngest runs get <run-id>` | Get run details, output and trace |
+| `inngest runs trace <run-id>` | Show the step-by-step trace tree |
 | `inngest runs cancel <run-id>` | Cancel a running function |
 | `inngest runs replay <run-id>` | Replay a function run |
 | `inngest runs watch` | Watch for new runs in real-time |
 
 ```bash
-# Filter by status and time range
-inngest runs list --status FAILED --since 1h --limit 50
+# Filter by status, function, app and time range (max 100 per page)
+inngest runs list --status FAILED,CANCELLED --since 1h --limit 50
+inngest runs list --function <fn-id> --app <app-id> --since 2024-01-01T00:00:00Z --until 12h
 
-# Get run details
+# Next page: pass page.cursor from the previous response
+inngest runs list --after <cursor>
+
+# Get run details, or block until it finishes
 inngest runs get 01HXYZ... --output text
+inngest runs get 01HXYZ... --wait
 
 # Watch runs live
-inngest runs watch --function my-func --interval 5s
+inngest runs watch --function <fn-id> --interval 5s
 ```
 
 ### Events
 
 | Command | Description |
 |---------|-------------|
-| `inngest events send <event-name>` | Send an event to Inngest Cloud |
+| `inngest events send <event-name>` | Send an event (Event API with an event key, otherwise REST API) |
 | `inngest events get <event-id>` | Get event details and triggered runs |
 | `inngest events list` | List recent events |
-| `inngest events types` | List unique event names seen recently |
+| `inngest events types` | List event types seen in the environment (`--schema` for inferred data shapes) |
 
 ```bash
 # Send an event with data
 inngest events send test/user.signup --data '{"userId": "123"}'
 
-# Pipe data from stdin
+# Pipe data from stdin, or read a file
 echo '{"userId": "456"}' | inngest events send test/user.signup
+inngest events send test/user.signup --data-file payload.json
 
-# List recent events of a specific type
-inngest events list --name user.signup
+# List recent events of a specific type; paginate with --after <internal_id>
+inngest events list --name user.signup --since 1h
 ```
 
 ### Environments
 
 | Command | Description |
 |---------|-------------|
-| `inngest env list` | List all environments (apps) |
+| `inngest env list` | List all environments of the account |
 | `inngest env use <name>` | Set the active environment |
 | `inngest env get <name-or-id>` | Get detailed environment info |
+
+### Apps
+
+| Command | Description |
+|---------|-------------|
+| `inngest apps list` | List apps (SDK deployments); `--archived` for archived ones |
+| `inngest apps get <app-id>` | Get app details including its latest sync |
+| `inngest apps sync <app-id> --url <serve-url>` | Re-sync an app's functions from its serve endpoint |
+
+### Raw API access
+
+`inngest api` calls any endpoint of the [Inngest REST API](https://api-docs.inngest.com) with your credentials — the escape hatch for anything not wrapped above:
+
+```bash
+inngest api /v2/runs?limit=5
+inngest api /v2/runs/<run-id>/cancel -X POST
+inngest api /v2/insights/query -X POST --body-file query.json
+```
 
 ### Dev Server
 
@@ -178,6 +212,8 @@ inngest dev invoke my-app-process-order --data '{"orderId": "abc"}'
 ```
 
 The dev server runs at `http://localhost:8288` by default. Override with `--dev-url`.
+Every cloud command also works against the dev server with the global `--dev` flag
+(e.g. `inngest runs get <id> --dev`).
 
 ### Monitoring
 
@@ -214,8 +250,20 @@ inngest backlog --output table
 | `--env`, `-e` | `production` | Target environment by name or ID |
 | `--output`, `-o` | `json` | Output format: `json`, `text`, `table` |
 | `--dev` | `false` | Route requests to local dev server |
-| `--api-url` | | Override API base URL (for self-hosted Inngest) |
+| `--api-url` | | Override API base URL (for self-hosted Inngest; credentials are only sent over `https://` or to localhost) |
 | `--dev-url` | | Override dev server URL |
+| `--timeout` | `30s` | Per-request timeout |
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Error (bad input, API or network failure) |
+| `2` | Interrupted (Ctrl+C / SIGTERM) |
+| `4` | Credential rejected by the API (401/403) |
+
+A rejected credential never produces an empty result with exit 0.
 
 ## Output Formats
 
@@ -227,19 +275,22 @@ All commands support three output formats via `--output`:
 
 ```bash
 inngest functions list --output table
-inngest runs list -o json | jq '.[].status'
+inngest runs list -o json | jq '.runs[].status'
 ```
 
 ## Configuration
 
-Config is stored at `~/.config/inngest/cli.json` (0600 permissions).
+Config is stored in the OS config directory (0600 permissions): `~/.config/inngest/cli.json` on Linux,
+`~/Library/Application Support/inngest/cli.json` on macOS, `%AppData%\inngest\cli.json` on Windows.
+`inngest config path` prints the resolved location.
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
+| `INNGEST_API_KEY` | API key for Inngest Cloud API access (recommended) |
 | `INNGEST_SIGNING_KEY` | Signing key for Inngest Cloud API access |
-| `INNGEST_EVENT_KEY` | Event key for sending events |
+| `INNGEST_EVENT_KEY` | Event key for sending events via the Event API |
 | `INNGEST_CLI_CONFIG` | Override config file path |
 
 Environment variables take precedence over config file values.
@@ -258,7 +309,7 @@ Built in Go with a focus on simplicity, reliability, and minimal dependencies.
 
 - **CLI framework**: [Cobra](https://github.com/spf13/cobra) for command parsing and flag handling
 - **HTTP client**: Raw `net/http` — no SDK dependency
-- **API**: GraphQL for queries (functions, runs, environments), REST for events
+- **API**: Inngest [REST API v2](https://api-docs.inngest.com) (runs, functions, apps, envs, invoke, trace) and v1 (events); the dev server's GraphQL API when `--dev` is set
 - **Config**: Environment variables + JSON config file
 - **Output**: JSON / text / table via `pkg/output.Printer`
 - **Dependencies**: 2 Go modules (cobra, pflag) — near-zero supply chain risk

@@ -2,908 +2,396 @@ package inngest
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
 
-// eventsResponse is a helper that wraps function runs in the events-based
-// GraphQL response structure used by the new ListRuns query.
-func eventsResponse(functionRuns string) string {
-	return `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"name": "test/event",
-						"recent": [
-							{
-								"id": "evt-1",
-								"occurredAt": "2024-01-01T00:00:00Z",
-								"receivedAt": "2024-01-01T00:00:00Z",
-								"name": "test/event",
-								"functionRuns": [` + functionRuns + `]
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
+const testV2Run = `{
+  "id": "` + testRunID1 + `",
+  "status": "COMPLETED",
+  "app": {"id": "` + testAppID1 + `", "name": "` + testMyApp + `"},
+  "function": {"id": "` + testFnID1 + `", "name": "` + testSendEmail + `", "slug": "` + testSlugSend + `", "app": {"id": "` + testAppID1 + `"}},
+  "trigger": {"eventName": "` + testEventName + `", "eventIds": ["` + testEventID1 + `"], "cronSchedule": "", "isBatch": false},
+  "queuedAt": "` + testTimeQueued + `",
+  "startedAt": "` + testTimeStart + `",
+  "endedAt": "` + testTimeEnd + `",
+  "durationMs": "1000",
+  "output": {"ok": true}
+}`
+
+func TestListRunsOptions_Query(t *testing.T) {
+	until := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+	opts := ListRunsOptions{
+		First:         50,
+		After:         testCursor2,
+		Status:        []string{"failed", "Cancelled"},
+		FunctionIDs:   []string{testFnID1, testFnID2},
+		AppIDs:        []string{testAppID1},
+		From:          time.Date(2026, 9, 1, 0, 0, 0, 0, time.FixedZone("plus8", 8*3600)),
+		Until:         &until,
+		TimeField:     "startedAt",
+		Order:         "asc",
+		IncludeOutput: true,
+	}
+	q := opts.query()
+	want := map[string][]string{
+		"limit":         {"50"},
+		"cursor":        {testCursor2},
+		"status":        {"FAILED", "CANCELLED"},
+		"functionId":    {testFnID1, testFnID2},
+		"appId":         {testAppID1},
+		"from":          {"2026-08-31T16:00:00Z"},
+		"until":         {"2026-09-02T00:00:00Z"},
+		"timeField":     {"startedAt"},
+		"order":         {"ASC"},
+		"includeOutput": {"true"},
+	}
+	for key, vals := range want {
+		got := q[key]
+		if len(got) != len(vals) {
+			t.Errorf("%s = %v, want %v", key, got, vals)
+			continue
+		}
+		for i := range vals {
+			if got[i] != vals[i] {
+				t.Errorf("%s[%d] = %q, want %q", key, i, got[i], vals[i])
 			}
 		}
-	}`
+	}
+	if empty := (ListRunsOptions{}).query(); len(empty) != 0 {
+		t.Errorf("zero options produced query %v", empty)
+	}
 }
 
-func TestListRuns(t *testing.T) {
-	response := eventsResponse(`{
-		"id": "run-1",
-		"status": "COMPLETED",
-		"startedAt": "2024-01-01T00:00:01Z",
-		"endedAt": "2024-01-01T00:00:02Z",
-		"output": "{}",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	}`)
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+func TestListRuns_Cloud(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"GET " + testPathV2Runs: func(t *testing.T, r *http.Request) string {
+			requireQuery(t, r, map[string][]string{"limit": {"100"}, "status": {"FAILED"}})
+			return `{"data": [` + testV2Run + `], "page": {"cursor": "` + testCursor2 + `", "hasMore": true, "limit": 100}}`
+		},
 	})
 
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First: 10,
-	})
+	page, err := newCloudClient(srv).ListRuns(context.Background(), ListRunsOptions{First: 500, Status: []string{"failed"}})
 	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
+		t.Fatalf("ListRuns: %v", err)
 	}
-
-	// TotalCount is set to the number of filtered results.
-	if conn.TotalCount != 1 {
-		t.Errorf("expected TotalCount 1, got %d", conn.TotalCount)
+	if !page.Page.HasMore || page.Page.Cursor != testCursor2 {
+		t.Errorf("page = %+v, want hasMore with cursor %s", page.Page, testCursor2)
 	}
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge, got %d", len(conn.Edges))
+	if len(page.Runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(page.Runs))
 	}
-
-	edge := conn.Edges[0]
-	if edge.Node.ID != testRunID1Events {
-		t.Errorf("expected run ID 'run-1', got %q", edge.Node.ID)
+	run := page.Runs[0]
+	checks := map[string][2]string{
+		"ID":         {run.ID, testRunID1},
+		"Status":     {run.Status, testStatusDone},
+		"FunctionID": {run.FunctionID, testFnID1},
+		"AppID":      {run.AppID, testAppID1},
+		"EventName":  {run.EventName, testEventName},
+		"App.Name":   {run.App.Name, testMyApp},
+		"Fn.Slug":    {run.Function.Slug, testSlugSend},
+		"Output":     {string(run.Output), `{"ok": true}`},
 	}
-	if edge.Node.Status != testStatusCompleted {
-		t.Errorf("expected status 'COMPLETED', got %q", edge.Node.Status)
-	}
-	if edge.Node.EventName != "test/event" {
-		t.Errorf("expected eventName 'test/event', got %q", edge.Node.EventName)
-	}
-	if edge.Node.Function == nil {
-		t.Fatal("expected Function to be non-nil")
-	}
-	if edge.Node.Function.Name != "My Func" {
-		t.Errorf("expected function name 'My Func', got %q", edge.Node.Function.Name)
-	}
-	if edge.Node.Function.Slug != "my-func" {
-		t.Errorf("expected function slug 'my-func', got %q", edge.Node.Function.Slug)
-	}
-	if conn.PageInfo.HasNextPage {
-		t.Errorf("expected hasNextPage false")
-	}
-
-	// Verify the query contains the expected operation name.
-	if !strings.Contains(captured.Query, "ListRuns") {
-		t.Errorf("expected query to contain 'ListRuns', got %q", captured.Query)
-	}
-}
-
-func TestGetRun(t *testing.T) {
-	response := eventsResponse(`{
-		"id": "run-1",
-		"status": "RUNNING",
-		"startedAt": "2024-01-01T00:00:01Z",
-		"output": "{\"result\":true}",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	}`)
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	run, err := client.GetRun(context.Background(), testRunID1Events)
-	if err != nil {
-		t.Fatalf("GetRun returned error: %v", err)
-	}
-
-	// Verify scalar fields.
-	if run.ID != testRunID1Events {
-		t.Errorf("expected ID 'run-1', got %q", run.ID)
-	}
-	if run.Status != "RUNNING" {
-		t.Errorf("expected status 'RUNNING', got %q", run.Status)
-	}
-	if run.EventName != "test/event" {
-		t.Errorf("expected eventName 'test/event', got %q", run.EventName)
-	}
-	if run.Output != `{"result":true}` {
-		t.Errorf("expected output '{\"result\":true}', got %q", run.Output)
-	}
-
-	// Verify Function.
-	if run.Function == nil {
-		t.Fatal("expected Function to be non-nil")
-	}
-	if run.Function.Name != "My Func" {
-		t.Errorf("expected function name 'My Func', got %q", run.Function.Name)
-	}
-	if run.Function.Slug != "my-func" {
-		t.Errorf("expected function slug 'my-func', got %q", run.Function.Slug)
-	}
-}
-
-func TestGetRun_NotFound(t *testing.T) {
-	response := testEmptyEventsResp
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.GetRun(context.Background(), "nonexistent")
-	if err == nil {
-		t.Fatal("expected error for missing run, got nil")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected error to contain 'not found', got %q", err.Error())
-	}
-}
-
-func TestCancelRun(t *testing.T) {
-	response := `{
-		"data": {
-			"cancelRun": {
-				"id": "run-1",
-				"status": "CANCELLED"
-			}
+	for name, c := range checks {
+		if c[0] != c[1] {
+			t.Errorf("%s = %q, want %q", name, c[0], c[1])
 		}
-	}`
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	run, err := client.CancelRun(context.Background(), "env-uuid-123", testRunID1Events)
-	if err != nil {
-		t.Fatalf("CancelRun returned error: %v", err)
 	}
-
-	if run.ID != testRunID1Events {
-		t.Errorf("expected ID 'run-1', got %q", run.ID)
+	if run.DurationMs != 1000 {
+		t.Errorf("DurationMs = %d, want 1000", run.DurationMs)
 	}
-	if run.Status != "CANCELLED" {
-		t.Errorf("expected status 'CANCELLED', got %q", run.Status)
+	if len(run.EventIDs) != 1 || run.EventIDs[0] != testEventID1 {
+		t.Errorf("EventIDs = %v", run.EventIDs)
 	}
-
-	// Verify the query is a mutation with envID.
-	if !strings.Contains(captured.Query, "mutation") {
-		t.Errorf("expected query to contain 'mutation', got %q", captured.Query)
-	}
-	if !strings.Contains(captured.Query, "cancelRun") {
-		t.Errorf("expected query to contain 'cancelRun', got %q", captured.Query)
-	}
-	if !strings.Contains(captured.Query, "$envID: UUID!") {
-		t.Errorf("expected query to contain '$envID: UUID!', got %q", captured.Query)
-	}
-
-	// Verify the envID variable was sent.
-	if envID, ok := captured.Variables["envID"].(string); !ok || envID != "env-uuid-123" {
-		t.Errorf("expected envID variable 'env-uuid-123', got %v", captured.Variables["envID"])
+	if run.StartedAt == nil || run.EndedAt.Sub(*run.StartedAt) != time.Second {
+		t.Errorf("timestamps not decoded: started=%v ended=%v", run.StartedAt, run.EndedAt)
 	}
 }
 
-func TestCancelRun_NoEnvID(t *testing.T) {
-	response := `{
-		"data": {
-			"cancelRun": {
-				"id": "run-1",
-				"status": "CANCELLED"
-			}
-		}
-	}`
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	run, err := client.CancelRun(context.Background(), "", testRunID1Events)
-	if err != nil {
-		t.Fatalf("CancelRun returned error: %v", err)
-	}
-
-	if run.ID != testRunID1Events {
-		t.Errorf("expected ID 'run-1', got %q", run.ID)
-	}
-	if run.Status != "CANCELLED" {
-		t.Errorf("expected status 'CANCELLED', got %q", run.Status)
-	}
-
-	// Verify the query does NOT contain $envID when envID is empty.
-	if strings.Contains(captured.Query, "$envID") {
-		t.Errorf("expected query to NOT contain '$envID' when envID is empty, got %q", captured.Query)
-	}
-	if strings.Contains(captured.Query, "envID:") {
-		t.Errorf("expected query to NOT contain 'envID:' when envID is empty, got %q", captured.Query)
-	}
-
-	// Verify the envID variable was NOT sent.
-	if _, ok := captured.Variables["envID"]; ok {
-		t.Errorf("expected no envID variable, but got %v", captured.Variables["envID"])
-	}
-}
-
-func TestRerunRun(t *testing.T) {
-	response := `{
-		"data": {
-			"rerun": "run-2"
-		}
-	}`
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	newRunID, err := client.RerunRun(context.Background(), testRunID1Events)
-	if err != nil {
-		t.Fatalf("RerunRun returned error: %v", err)
-	}
-
-	if newRunID != "run-2" {
-		t.Errorf("expected new run ID 'run-2', got %q", newRunID)
-	}
-
-	// Verify the query is a mutation.
-	if !strings.Contains(captured.Query, "mutation") {
-		t.Errorf("expected query to contain 'mutation', got %q", captured.Query)
-	}
-	if !strings.Contains(captured.Query, "rerun") {
-		t.Errorf("expected query to contain 'rerun', got %q", captured.Query)
-	}
-	// Verify the runID variable was sent.
-	if runID, ok := captured.Variables["runID"].(string); !ok || runID != testRunID1Events {
-		t.Errorf("expected runID variable 'run-1', got %v", captured.Variables["runID"])
-	}
-}
-
-func TestListRuns_GraphQLError(t *testing.T) {
-	response := `{
-		"data": null,
-		"errors": [{"message": "unauthorized"}]
-	}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{First: 10})
-	if err == nil {
-		t.Fatal("expected error for GraphQL error response, got nil")
-	}
-	if !strings.Contains(err.Error(), "unauthorized") {
-		t.Errorf("expected error to contain 'unauthorized', got %q", err.Error())
-	}
-}
-
-func TestListRuns_HTTPError(t *testing.T) {
+func TestListRuns_CloudAuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("internal server error"))
+		writeJSON(w, http.StatusUnauthorized, testUnauthorized)
 	}))
 	defer srv.Close()
 
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.ListRuns(context.Background(), ListRunsOptions{First: 10})
-	if err == nil {
-		t.Fatal("expected error for 500 response, got nil")
-	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Errorf("expected error to mention status 500, got %q", err.Error())
+	_, err := newCloudClient(srv).ListRuns(context.Background(), ListRunsOptions{})
+	if !IsAuthError(err) {
+		t.Fatalf("want auth error, got %v", err)
 	}
 }
 
-func TestListRuns_StatusFilter(t *testing.T) {
-	// Response has two runs: one COMPLETED, one FAILED.
-	response := `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"name": "test/event",
-						"recent": [
-							{
-								"id": "evt-1",
-								"occurredAt": "2024-01-01T00:00:00Z",
-								"receivedAt": "2024-01-01T00:00:00Z",
-								"name": "test/event",
-								"functionRuns": [
-									{
-										"id": "run-1",
-										"status": "COMPLETED",
-										"startedAt": "2024-01-01T00:00:01Z",
-										"endedAt": "2024-01-01T00:00:02Z",
-										"output": "{}",
-										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-									},
-									{
-										"id": "run-2",
-										"status": "FAILED",
-										"startedAt": "2024-01-01T00:00:01Z",
-										"endedAt": "2024-01-01T00:00:02Z",
-										"output": "{}",
-										"function": {"id": "fn-2", "name": "Fn2", "slug": "fn-2"}
-									}
-								]
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
+func TestV2Run_ToFunctionRun_Fallbacks(t *testing.T) {
+	var r v2Run
+	raw := `{"id":"x","status":"RUNNING","function":{"id":"f","app":{"id":"from-fn"}},"output":null}`
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		t.Fatal(err)
+	}
+	run := r.toFunctionRun()
+	if run.AppID != "from-fn" {
+		t.Errorf("AppID = %q, want app id from function.app", run.AppID)
+	}
+	if run.Output != nil {
+		t.Errorf("Output = %q, want nil for null", run.Output)
+	}
+	if run.App != nil || run.EventName != "" {
+		t.Errorf("unexpected app/trigger data: %+v", run)
+	}
+}
+
+func TestNormalizeJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"null", "null", ""},
+		{"object", `{"a":1}`, `{"a":1}`},
+		{"encoded json string", `"{\"a\":1}"`, `{"a":1}`},
+		{"plain string stays", `"hello"`, `"hello"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := string(normalizeJSON(json.RawMessage(tt.in))); got != tt.want {
+				t.Errorf("normalizeJSON(%s) = %s, want %s", tt.in, got, tt.want)
 			}
-		}
-	}`
+		})
+	}
+}
 
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+func TestGetRun_Cloud(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"GET /v2/runs/" + testRunID1: func(t *testing.T, r *http.Request) string {
+			requireQuery(t, r, map[string][]string{"includeOutput": {"true"}})
+			return `{"data": ` + testV2Run + `}`
+		},
 	})
-
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First:  10,
-		Status: []string{"COMPLETED"},
-	})
+	run, err := newCloudClient(srv).GetRun(context.Background(), testRunID1)
 	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
+		t.Fatalf("GetRun: %v", err)
 	}
-
-	// Only the COMPLETED run should be returned (client-side filtering).
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge, got %d", len(conn.Edges))
-	}
-	if conn.Edges[0].Node.ID != "run-1" {
-		t.Errorf("expected run-1, got %q", conn.Edges[0].Node.ID)
-	}
-	if conn.Edges[0].Node.Status != "COMPLETED" {
-		t.Errorf("expected COMPLETED, got %q", conn.Edges[0].Node.Status)
+	if run.ID != testRunID1 || run.Function.Name != testSendEmail {
+		t.Errorf("run = %+v", run)
 	}
 }
 
-func TestCancelRun_NilResult(t *testing.T) {
-	response := `{"data": {"cancelRun": null}}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.CancelRun(context.Background(), "env-uuid-123", testRunID1Events)
-	if err == nil {
-		t.Fatal("expected error for nil cancelRun result, got nil")
-	}
-	if !strings.Contains(err.Error(), "no result") {
-		t.Errorf("expected error to contain 'no result', got %q", err.Error())
-	}
-}
-
-func TestListRuns_Empty(t *testing.T) {
-	response := testEmptyEventsResp
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-	if len(conn.Edges) != 0 {
-		t.Errorf("expected 0 edges, got %d", len(conn.Edges))
-	}
-	if conn.TotalCount != 0 {
-		t.Errorf("expected totalCount 0, got %d", conn.TotalCount)
-	}
-}
-
-func TestStatusToUpper(t *testing.T) {
-	input := []string{"running", "Failed", "COMPLETED"}
-	result := StatusToUpper(input)
-
-	if len(result) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(result))
-	}
-	expected := []string{"RUNNING", "FAILED", "COMPLETED"}
-	for i, v := range result {
-		if v != expected[i] {
-			t.Errorf("result[%d] = %q, want %q", i, v, expected[i])
-		}
-	}
-}
-
-func TestStatusToUpperEmpty(t *testing.T) {
-	result := StatusToUpper([]string{})
-	if len(result) != 0 {
-		t.Errorf("expected empty result, got %v", result)
-	}
-}
-
-func TestListRuns_FromFilter(t *testing.T) {
-	// The From filter is applied client-side. Provide two runs: one before
-	// the threshold and one after.
-	response := `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"name": "test/event",
-						"recent": [
-							{
-								"id": "evt-1",
-								"occurredAt": "2025-05-01T00:00:00Z",
-								"receivedAt": "2025-05-01T00:00:00Z",
-								"name": "test/event",
-								"functionRuns": [
-									{
-										"id": "run-early",
-										"status": "COMPLETED",
-										"startedAt": "2025-05-01T00:00:00Z",
-										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-									},
-									{
-										"id": "run-late",
-										"status": "COMPLETED",
-										"startedAt": "2025-07-01T00:00:00Z",
-										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-									}
-								]
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
-			}
-		}
-	}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	from := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First: 10,
-		From:  from,
-	})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-
-	// Only run-late should pass the From filter.
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge after From filter, got %d", len(conn.Edges))
-	}
-	if conn.Edges[0].Node.ID != "run-late" {
-		t.Errorf("expected run-late, got %q", conn.Edges[0].Node.ID)
-	}
-}
-
-func TestListRuns_UntilFilter(t *testing.T) {
-	// The Until filter is applied client-side. Provide two runs: one before
-	// the threshold and one after.
-	response := `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"name": "test/event",
-						"recent": [
-							{
-								"id": "evt-1",
-								"occurredAt": "2025-05-01T00:00:00Z",
-								"receivedAt": "2025-05-01T00:00:00Z",
-								"name": "test/event",
-								"functionRuns": [
-									{
-										"id": "run-early",
-										"status": "COMPLETED",
-										"startedAt": "2025-05-01T00:00:00Z",
-										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-									},
-									{
-										"id": "run-late",
-										"status": "COMPLETED",
-										"startedAt": "2025-07-01T00:00:00Z",
-										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-									}
-								]
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
-			}
-		}
-	}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First: 10,
-		Until: &until,
-	})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-
-	// Only run-early should pass the Until filter.
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge after Until filter, got %d", len(conn.Edges))
-	}
-	if conn.Edges[0].Node.ID != "run-early" {
-		t.Errorf("expected run-early, got %q", conn.Edges[0].Node.ID)
-	}
-}
-
-func TestListRuns_FunctionIDsFilter(t *testing.T) {
-	// The FunctionIDs filter is applied client-side.
-	response := `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"name": "test/event",
-						"recent": [
-							{
-								"id": "evt-1",
-								"occurredAt": "2025-05-01T00:00:00Z",
-								"receivedAt": "2025-05-01T00:00:00Z",
-								"name": "test/event",
-								"functionRuns": [
-									{
-										"id": "run-1",
-										"status": "COMPLETED",
-										"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-									},
-									{
-										"id": "run-2",
-										"status": "COMPLETED",
-										"function": {"id": "fn-2", "name": "Fn2", "slug": "fn-2"}
-									}
-								]
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
-			}
-		}
-	}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First:       10,
-		FunctionIDs: []string{"fn-1"},
-	})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge after FunctionIDs filter, got %d", len(conn.Edges))
-	}
-	if conn.Edges[0].Node.ID != "run-1" {
-		t.Errorf("expected run-1, got %q", conn.Edges[0].Node.ID)
-	}
-}
-
-func TestListRuns_AppIDsFilter(t *testing.T) {
-	// AppIDs filter is in ListRunsOptions but the events-based response
-	// doesn't include appID on function runs. Verify that when AppIDs
-	// is set the query still executes without error (filtering is a no-op
-	// because runs lack Function.ID matching appIDs).
-	response := eventsResponse(`{
-		"id": "run-1",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-	}`)
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{
-		First:  10,
-		AppIDs: []string{"app-1"},
-	})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-
-	// AppIDs filter doesn't match Function.ID or Slug, so run passes through.
-	if len(conn.Edges) != 1 {
-		t.Fatalf("expected 1 edge, got %d", len(conn.Edges))
-	}
-}
-
-func TestGetRun_GraphQLError(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "permission denied"}]}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.GetRun(context.Background(), testRunID1Events)
-	if err == nil {
-		t.Fatal("expected error for GraphQL error response, got nil")
-	}
-	if !strings.Contains(err.Error(), "permission denied") {
-		t.Errorf("expected error to contain 'permission denied', got %q", err.Error())
-	}
-}
-
-func TestCancelRun_GraphQLError(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "run not cancellable"}]}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.CancelRun(context.Background(), "env-uuid-123", testRunID1Events)
-	if err == nil {
-		t.Fatal("expected error for GraphQL error response, got nil")
-	}
-	if !strings.Contains(err.Error(), "run not cancellable") {
-		t.Errorf("expected error to contain 'run not cancellable', got %q", err.Error())
-	}
-}
-
-func TestRerunRun_GraphQLError(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "rerun failed"}]}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.RerunRun(context.Background(), testRunID1Events)
-	if err == nil {
-		t.Fatal("expected error for GraphQL error response, got nil")
-	}
-	if !strings.Contains(err.Error(), "rerun failed") {
-		t.Errorf("expected error to contain 'rerun failed', got %q", err.Error())
-	}
-}
-
-func TestGetRun_PostMethod(t *testing.T) {
-	var method string
-
-	// GetRun calls ListRuns under the hood, so serve the events-based response.
-	response := eventsResponse(`{
-		"id": "run-1",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "Fn1", "slug": "fn-1"}
-	}`)
-
+func TestGetRun_CloudNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		method = r.Method
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(response))
+		writeJSON(w, http.StatusNotFound, testNotFoundResp)
 	}))
 	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	_, err := client.GetRun(context.Background(), testRunID1Events)
-	if err != nil {
-		t.Fatalf("GetRun returned error: %v", err)
-	}
-	if method != http.MethodPost {
-		t.Errorf("expected POST method, got %q", method)
+	if _, err := newCloudClient(srv).GetRun(context.Background(), "missing"); !IsNotFound(err) {
+		t.Fatalf("want not-found error, got %v", err)
 	}
 }
 
-// TestListRuns_DeduplicatesRunIDs verifies that the same function run
-// appearing under multiple event instances is only returned once.
-func TestListRuns_DeduplicatesRunIDs(t *testing.T) {
-	// The same run ID appears twice in the same event's functionRuns list.
-	response := eventsResponse(`{
-		"id": "run-dup",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	},
-	{
-		"id": "run-dup",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	},
-	{
-		"id": "run-unique",
-		"status": "RUNNING",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	}`)
-
-	srv := newTestServer(t, response, nil)
+func TestGetRun_PathEscapesID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/v2/runs/a%2Fb" {
+			t.Errorf("escaped path = %s", r.URL.EscapedPath())
+		}
+		writeJSON(w, http.StatusOK, `{"data": {"id": "a/b", "status": "QUEUED"}}`)
+	}))
 	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{First: 10})
-	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
-	}
-
-	if len(conn.Edges) != 2 {
-		t.Fatalf("expected 2 deduplicated edges, got %d", len(conn.Edges))
-	}
-	if conn.TotalCount != 2 {
-		t.Errorf("expected TotalCount 2, got %d", conn.TotalCount)
-	}
-
-	seen := map[string]int{}
-	for _, e := range conn.Edges {
-		seen[e.Node.ID]++
-	}
-	if seen["run-dup"] != 1 {
-		t.Errorf("expected 'run-dup' exactly once, got %d", seen["run-dup"])
-	}
-	if seen["run-unique"] != 1 {
-		t.Errorf("expected 'run-unique' exactly once, got %d", seen["run-unique"])
+	if _, err := newCloudClient(srv).GetRun(context.Background(), "a/b"); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// TestListRuns_AppliesLimit verifies results are truncated to opts.First.
-func TestListRuns_AppliesLimit(t *testing.T) {
-	response := eventsResponse(`{
-		"id": "run-1",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	},
-	{
-		"id": "run-2",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	},
-	{
-		"id": "run-3",
-		"status": "COMPLETED",
-		"function": {"id": "fn-1", "name": "My Func", "slug": "my-func"}
-	}`)
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+func TestGetRunTrace_Cloud(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"GET /v2/runs/" + testRunID1 + "/trace": staticRoute(`{"data": {"runId": "` + testRunID1 + `", "rootSpan": {
+			"id": "s1", "name": "fn", "status": "COMPLETED", "stepOp": "RUN", "durationMs": "12",
+			"children": [{"id": "s2", "name": "step", "status": "COMPLETED", "stepOp": "SLEEP", "durationMs": 5}]}}}`),
 	})
-
-	conn, err := client.ListRuns(context.Background(), ListRunsOptions{First: 2})
+	trace, err := newCloudClient(srv).GetRunTrace(context.Background(), testRunID1)
 	if err != nil {
-		t.Fatalf("ListRuns returned error: %v", err)
+		t.Fatalf("GetRunTrace: %v", err)
 	}
-
-	if len(conn.Edges) != 2 {
-		t.Fatalf("expected results truncated to 2, got %d", len(conn.Edges))
+	if trace.ID != "s1" || trace.DurationMs != 12 || len(trace.Children) != 1 {
+		t.Fatalf("trace = %+v", trace)
 	}
-	if conn.TotalCount != 2 {
-		t.Errorf("expected TotalCount 2, got %d", conn.TotalCount)
-	}
-	if conn.Edges[0].Node.ID != testRunID1Events || conn.Edges[1].Node.ID != "run-2" {
-		t.Errorf("expected the first 2 runs in order, got %q and %q",
-			conn.Edges[0].Node.ID, conn.Edges[1].Node.ID)
+	if child := trace.Children[0]; child.StepOp != "SLEEP" || child.DurationMs != 5 {
+		t.Errorf("child = %+v", child)
 	}
 }
 
-// TestCancelRun_NoEnvIDErrorHint verifies that when no envID was supplied and
-// the API complains about envID, the error carries the actionable hint.
-func TestCancelRun_NoEnvIDErrorHint(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "envID is required for this operation"}]}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+func TestCancelAndRerun_Cloud(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"POST /v2/runs/" + testRunID1 + "/cancel": func(t *testing.T, r *http.Request) string {
+			if body := decodeJSONBody(t, r); len(body) != 0 {
+				t.Errorf("cancel body = %v, want {}", body)
+			}
+			return `{"data": {"runId": ""}}`
+		},
+		"POST /v2/runs/" + testRunID1 + "/rerun": staticRoute(`{"data": {"runId": "` + testRunID2 + `"}}`),
 	})
+	client := newCloudClient(srv)
 
-	_, err := client.CancelRun(context.Background(), "", testRunID1Events)
-	if err == nil {
-		t.Fatal("expected error when API reports missing envID")
+	id, err := client.CancelRun(context.Background(), testRunID1)
+	if err != nil || id != testRunID1 {
+		t.Errorf("CancelRun = (%q, %v), want input id echoed", id, err)
 	}
-	if !strings.Contains(err.Error(), "--env-id") {
-		t.Errorf("expected hint mentioning '--env-id', got: %v", err)
+	newID, err := client.RerunRun(context.Background(), testRunID1)
+	if err != nil || newID != testRunID2 {
+		t.Errorf("RerunRun = (%q, %v), want %s", newID, err, testRunID2)
 	}
-	if !strings.Contains(err.Error(), "INNGEST_ENV_ID") {
-		t.Errorf("expected hint mentioning 'INNGEST_ENV_ID', got: %v", err)
+}
+
+func TestIsTerminalRunStatus(t *testing.T) {
+	for status, want := range map[string]bool{
+		"COMPLETED": true, "failed": true, "Cancelled": true,
+		"RUNNING": false, "QUEUED": false, "": false,
+	} {
+		if got := IsTerminalRunStatus(status); got != want {
+			t.Errorf("IsTerminalRunStatus(%q) = %v, want %v", status, got, want)
+		}
+	}
+}
+
+// --- dev server (GraphQL) paths ---
+
+const testDevRunsResp = `{"data":{"runs":{"edges":[
+  {"node":{"id":"` + testRunID1 + `","functionID":"` + testFnID1 + `","status":"COMPLETED","eventName":"` + testEventName + `","eventIDs":["` + testEventID1 + `"],"queuedAt":"` + testTimeQueued + `","function":{"id":"` + testFnID1 + `","name":"` + testSendEmail + `","slug":"` + testSlugSend + `"},"app":{"id":"` + testAppID1 + `","name":"` + testMyApp + `"}}},
+  {"node":{"id":"` + testRunID2 + `","functionID":"` + testFnID1 + `","status":"FAILED"}}
+],"pageInfo":{"hasNextPage":true,"endCursor":"` + testCursor2 + `"}}}}`
+
+func TestListRuns_Dev(t *testing.T) {
+	srv, rec := newDevGQLServer(t, map[string]string{"DevRuns": testDevRunsResp})
+	until := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+
+	page, err := newDevClient(srv).ListRuns(context.Background(), ListRunsOptions{
+		Status: []string{"failed"}, FunctionIDs: []string{testFnID1}, AppIDs: []string{testAppID1},
+		Until: &until, TimeField: "endedAt", Order: "asc", After: testCursor2,
+	})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	// Client-side status filter drops the COMPLETED run (dev server ignores filter.status).
+	if len(page.Runs) != 1 || page.Runs[0].ID != testRunID2 {
+		t.Fatalf("runs = %+v, want only the FAILED run", page.Runs)
+	}
+	if !page.Page.HasMore || page.Page.Cursor != testCursor2 || page.Page.Limit != 20 {
+		t.Errorf("page = %+v", page.Page)
+	}
+
+	vars := rec.last(t).Variables
+	if vars["first"] != float64(20) || vars["after"] != testCursor2 {
+		t.Errorf("first/after = %v/%v", vars["first"], vars["after"])
+	}
+	const wantField = "ENDED_AT"
+	orderBy := vars["orderBy"].([]any)[0].(map[string]any)
+	if orderBy["field"] != wantField || orderBy["direction"] != "ASC" {
+		t.Errorf("orderBy = %v", orderBy)
+	}
+	filter := vars["filter"].(map[string]any)
+	if filter["from"] != "1970-01-01T00:00:00Z" || filter["until"] != "2026-09-02T00:00:00Z" || filter["timeField"] != wantField {
+		t.Errorf("filter times = %v", filter)
+	}
+	if got := filter["status"].([]any); len(got) != 1 || got[0] != "FAILED" {
+		t.Errorf("filter.status = %v", got)
+	}
+	if got := filter["functionIDs"].([]any); len(got) != 1 || got[0] != testFnID1 {
+		t.Errorf("filter.functionIDs = %v", got)
+	}
+	if got := filter["appIDs"].([]any); len(got) != 1 || got[0] != testAppID1 {
+		t.Errorf("filter.appIDs = %v", got)
+	}
+}
+
+func TestListRuns_DevDefaultsAndError(t *testing.T) {
+	srv, rec := newDevGQLServer(t, map[string]string{"DevRuns": testDevRunsResp})
+	page, err := newDevClient(srv).ListRuns(context.Background(), ListRunsOptions{})
+	if err != nil || len(page.Runs) != 2 {
+		t.Fatalf("ListRuns = (%d runs, %v)", len(page.Runs), err)
+	}
+	vars := rec.last(t).Variables
+	if _, ok := vars["after"]; ok {
+		t.Error("after should be omitted when empty")
+	}
+	if orderBy := vars["orderBy"].([]any)[0].(map[string]any); orderBy["field"] != "QUEUED_AT" || orderBy["direction"] != "DESC" {
+		t.Errorf("default orderBy = %v", orderBy)
+	}
+
+	errSrv, _ := newDevGQLServer(t, map[string]string{"DevRuns": `{"errors":[{"message":"boom"}]}`})
+	if _, err := newDevClient(errSrv).ListRuns(context.Background(), ListRunsOptions{}); err == nil {
+		t.Error("expected GraphQL error to propagate")
+	}
+}
+
+func TestGetRun_Dev(t *testing.T) {
+	srv, rec := newDevGQLServer(t, map[string]string{
+		"DevRun": `{"data":{"run":{"id":"` + testRunID1 + `","status":"COMPLETED","output":"{\"ok\":true}"}}}`,
+		"DevRunTrace": `{"data":{"run":{"id":"` + testRunID1 + `",
+			"trace":{"id":"s1","name":"fn","status":"COMPLETED","durationMs":12,"children":[{"id":"s2","name":"step","status":"COMPLETED"}]}}}}`,
+	})
+	client := newDevClient(srv)
+
+	run, err := client.GetRun(context.Background(), testRunID1)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if rec.last(t).Variables["runID"] != testRunID1 {
+		t.Errorf("runID variable = %v", rec.last(t).Variables["runID"])
+	}
+	if string(run.Output) != `{"ok":true}` {
+		t.Errorf("Output = %s, want unwrapped JSON", run.Output)
+	}
+	if run.Trace != nil {
+		t.Error("GetRun must not depend on the trace query in dev mode")
+	}
+
+	trace, err := client.GetRunTrace(context.Background(), testRunID1)
+	if err != nil || trace.ID != "s1" || len(trace.Children) != 1 {
+		t.Errorf("GetRunTrace = (%+v, %v)", trace, err)
+	}
+}
+
+func TestGetRunTrace_DevNotStarted(t *testing.T) {
+	// The dev server reports a run with no spans yet as a GraphQL error.
+	srv, _ := newDevGQLServer(t, map[string]string{
+		"DevRunTrace": `{"data":null,"errors":[{"message":"no function run span found"}]}`,
+	})
+	if _, err := newDevClient(srv).GetRunTrace(context.Background(), testRunID1); !IsNotFound(err) {
+		t.Fatalf("want not-found for a run without spans, got %v", err)
+	}
+
+	missing, _ := newDevGQLServer(t, map[string]string{"DevRunTrace": `{"data":{"run":null}}`})
+	if _, err := newDevClient(missing).GetRunTrace(context.Background(), "x"); !IsNotFound(err) {
+		t.Errorf("missing run = %v", err)
+	}
+	other, _ := newDevGQLServer(t, map[string]string{"DevRunTrace": `{"data":null,"errors":[{"message":"boom"}]}`})
+	if _, err := newDevClient(other).GetRunTrace(context.Background(), "x"); err == nil || IsNotFound(err) {
+		t.Errorf("unrelated GraphQL error must propagate, got %v", err)
+	}
+}
+
+func TestGetRun_DevNotFound(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{"DevRun": `{"data":{"run":null}}`})
+	if _, err := newDevClient(srv).GetRun(context.Background(), "missing"); !IsNotFound(err) {
+		t.Fatalf("want not-found, got %v", err)
+	}
+}
+
+func TestCancelAndRerun_Dev(t *testing.T) {
+	srv, rec := newDevGQLServer(t, map[string]string{
+		"DevCancelRun": `{"data":{"cancelRun":{"id":""}}}`,
+		"DevRerun":     `{"data":{"rerun":"` + testRunID2 + `"}}`,
+	})
+	client := newDevClient(srv)
+
+	id, err := client.CancelRun(context.Background(), testRunID1)
+	if err != nil || id != testRunID1 {
+		t.Errorf("CancelRun = (%q, %v)", id, err)
+	}
+	if rec.last(t).Variables["runID"] != testRunID1 {
+		t.Errorf("cancel runID = %v", rec.last(t).Variables["runID"])
+	}
+	newID, err := client.RerunRun(context.Background(), testRunID1)
+	if err != nil || newID != testRunID2 {
+		t.Errorf("RerunRun = (%q, %v)", newID, err)
 	}
 }

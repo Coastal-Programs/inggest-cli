@@ -36,6 +36,7 @@ func NewAuthCmd() *cobra.Command {
 }
 
 // resolveSigningKey resolves the signing key from flag, env var, or interactive prompt.
+// An empty result with a nil error means the caller supplied an API key instead.
 func resolveSigningKey(flagValue string) (string, error) {
 	key := flagValue
 	if key == "" {
@@ -59,6 +60,7 @@ func resolveSigningKey(flagValue string) (string, error) {
 }
 
 func newAuthLoginCmd() *cobra.Command {
+	var apiKey string
 	var signingKey string
 	var signingKeyFallback string
 	var eventKey string
@@ -66,15 +68,26 @@ func newAuthLoginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with Inngest",
-		Long:  "Save your Inngest signing key (and optionally event key) to the CLI config.",
+		Long: `Save your Inngest credentials to the CLI config.
+
+Use an API key (--api-key or INNGEST_API_KEY; recommended for CLI, CI and AI agents,
+create one under Settings → API keys) or a signing key (--signing-key or
+INNGEST_SIGNING_KEY). An event key is optional and only needed for the Event API.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := state.Config
 			format := output.Format(state.Output)
 
+			if apiKey == "" {
+				apiKey = os.Getenv("INNGEST_API_KEY")
+			}
+			apiKey = strings.TrimSpace(apiKey)
+
 			var err error
-			signingKey, err = resolveSigningKey(signingKey)
-			if err != nil {
-				return err
+			if apiKey == "" {
+				signingKey, err = resolveSigningKey(signingKey)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Resolve event key: flag > env > prompt
@@ -85,7 +98,12 @@ func newAuthLoginCmd() *cobra.Command {
 				eventKey, _ = readSecret("Enter event key (optional, press Enter to skip): ")
 			}
 
-			cfg.SigningKey = signingKey
+			if apiKey != "" {
+				cfg.APIKey = apiKey
+			}
+			if signingKey != "" {
+				cfg.SigningKey = signingKey
+			}
 			if eventKey != "" {
 				cfg.EventKey = strings.TrimSpace(eventKey)
 			}
@@ -106,26 +124,32 @@ func newAuthLoginCmd() *cobra.Command {
 				return fmt.Errorf("saving config: %w", err)
 			}
 
-			result := map[string]string{
-				"status":      "authenticated",
-				"signing_key": config.Redact(signingKey),
-			}
-			if cfg.SigningKeyFallback != "" {
-				result["signing_key_fallback"] = config.Redact(cfg.SigningKeyFallback)
-			}
-			if cfg.EventKey != "" {
-				result["event_key"] = config.Redact(cfg.EventKey)
-			}
-
-			return output.Print(result, format)
+			return output.Print(loginResult(cfg), format)
 		},
 	}
 
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "Inngest API key (recommended; Settings → API keys)")
 	cmd.Flags().StringVar(&signingKey, "signing-key", "", "Inngest signing key")
 	cmd.Flags().StringVar(&signingKeyFallback, "signing-key-fallback", "", "Inngest signing key fallback (for key rotation)")
 	cmd.Flags().StringVar(&eventKey, "event-key", "", "Inngest event key (for sending events)")
 
 	return cmd
+}
+
+// loginResult summarises the stored credentials with every secret redacted.
+func loginResult(cfg *config.Config) map[string]string {
+	result := map[string]string{"status": "authenticated"}
+	for name, value := range map[string]string{
+		"api_key":              cfg.APIKey,
+		"signing_key":          cfg.SigningKey,
+		"signing_key_fallback": cfg.SigningKeyFallback,
+		"event_key":            cfg.EventKey,
+	} {
+		if value != "" {
+			result[name] = config.Redact(value)
+		}
+	}
+	return result
 }
 
 func newAuthLogoutCmd() *cobra.Command {
@@ -137,6 +161,7 @@ func newAuthLogoutCmd() *cobra.Command {
 			cfg := state.Config
 			format := output.Format(state.Output)
 
+			cfg.APIKey = ""
 			cfg.SigningKey = ""
 			cfg.SigningKeyFallback = ""
 			cfg.EventKey = ""
@@ -170,27 +195,21 @@ func populateKeyStatus(result map[string]any, keyName, keyValue, envVarValue, co
 	}
 }
 
-// validateAPIConnection checks if the signing key is valid by querying the API.
-func validateAPIConnection(result map[string]any, signingKey, signingKeyFallback string) {
+// validateAPIConnection checks whether the credential is accepted by the API
+// using an authenticated v2 call (a bad key returns 401, never an empty result).
+func validateAPIConnection(ctx context.Context, result map[string]any, credential, signingKeyFallback string) {
 	client := inngest.NewClient(inngest.ClientOptions{
-		SigningKey:         signingKey,
+		SigningKey:         credential,
 		SigningKeyFallback: signingKeyFallback,
 		Env:                state.Env,
 		APIBaseURL:         state.APIBaseURL,
 		DevServerURL:       state.DevServer,
 		DevMode:            state.DevMode,
 		UserAgent:          "inngest-cli/" + state.AppVersion,
+		Timeout:            state.Timeout,
 	})
 
-	var data any
-	err := client.ExecuteGraphQL(
-		context.Background(),
-		"AuthCheck",
-		`query AuthCheck { __typename }`,
-		nil,
-		&data,
-	)
-	if err != nil {
+	if _, err := client.ListEnvironments(ctx); err != nil {
 		result["api_validation"] = "failed"
 		result["api_validation_error"] = err.Error()
 	} else {
@@ -207,17 +226,20 @@ func newAuthStatusCmd() *cobra.Command {
 			cfg := state.Config
 			format := output.Format(state.Output)
 
+			apiKey := cfg.GetAPIKey()
 			signingKey := cfg.GetSigningKey()
 			signingKeyFallback := cfg.GetSigningKeyFallback()
 			eventKey := cfg.GetEventKey()
+			credential := cfg.GetAPICredential()
 
 			result := map[string]any{
-				"authenticated":  signingKey != "",
+				"authenticated":  credential != "",
 				"environment":    state.Env,
 				"api_base_url":   state.APIBaseURL,
 				"dev_server_url": state.DevServer,
 			}
 
+			populateKeyStatus(result, "api_key", apiKey, os.Getenv("INNGEST_API_KEY"), cfg.APIKey, "INNGEST_API_KEY")
 			populateKeyStatus(result, "signing_key", signingKey, os.Getenv("INNGEST_SIGNING_KEY"), cfg.SigningKey, "INNGEST_SIGNING_KEY")
 			populateKeyStatus(result, "signing_key_fallback", signingKeyFallback, os.Getenv("INNGEST_SIGNING_KEY_FALLBACK"), cfg.SigningKeyFallback, "INNGEST_SIGNING_KEY_FALLBACK")
 			populateKeyStatus(result, "event_key", eventKey, os.Getenv("INNGEST_EVENT_KEY"), cfg.EventKey, "INNGEST_EVENT_KEY")
@@ -227,8 +249,8 @@ func newAuthStatusCmd() *cobra.Command {
 				result["custom_api_url"] = true
 			}
 
-			if signingKey != "" {
-				validateAPIConnection(result, signingKey, signingKeyFallback)
+			if credential != "" {
+				validateAPIConnection(cmd.Context(), result, credential, signingKeyFallback)
 			}
 
 			return output.Print(result, format)

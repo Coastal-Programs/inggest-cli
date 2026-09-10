@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -209,26 +208,23 @@ func TestAuthLoginKeyFromEnv(t *testing.T) {
 
 // newAuthCheckMockServer creates a mock HTTP server that handles the AuthCheck GraphQL query.
 // If success is true, it returns a valid response; otherwise it returns an error response.
+// newAuthCheckMockServer stubs the authenticated v2 call auth status uses to
+// validate the credential (GET /v2/envs).
 func newAuthCheckMockServer(success bool) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		defer r.Body.Close()
-
-		var req struct {
-			OperationName string `json:"operationName"`
-		}
-		json.Unmarshal(body, &req)
-
-		w.Header().Set("Content-Type", "application/json")
-		if req.OperationName == "AuthCheck" {
-			if success {
-				w.Write([]byte(`{"data":{"functions":[{"id":"fn-1","name":"test-fn"}]}}`))
-			} else {
-				w.Write([]byte(`{"data":null,"errors":[{"message":"unauthorized"}]}`))
-			}
-		} else {
+		if r.URL.Path != "/v2/envs" {
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		if r.Header.Get("Authorization") == "" {
+			jsonStatus(http.StatusUnauthorized, v2Unauthorized)(w, r)
+			return
+		}
+		if success {
+			jsonOK(`{"data":[{"id":"env-1","name":"production","type":"PRODUCTION"}]}`)(w, r)
+			return
+		}
+		jsonStatus(http.StatusUnauthorized, v2Unauthorized)(w, r)
 	}))
 }
 

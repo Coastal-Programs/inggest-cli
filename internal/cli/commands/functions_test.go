@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -177,13 +178,20 @@ func TestBuildConfigOutputNoConfig(t *testing.T) {
 // Integration tests using mock GraphQL server
 // ---------------------------------------------------------------------------
 
-// Both ListFunctions and GetFunction use the "ListFunctions" operation name,
-// since GetFunction calls ListFunctions internally.
-const listFunctionsResponse = `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"payment/created"}],"app":{"id":"app-1","name":"billing-app","externalID":"billing-app"}},{"id":"fn-2","name":"Send Email","slug":"send-email","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"user/signup"}],"app":{"id":"app-1","name":"billing-app","externalID":"billing-app"}}]}],"page":{"page":1,"totalPages":1}}}}`
+const listFunctionsResponse = `[{"id":"fn-1","name":"Process Payment","slug":"process-payment","isPaused":false,"isArchived":false,"triggers":[{"type":"EVENT","value":"payment/created"}],"app":{"id":"app-1"}},{"id":"fn-2","name":"Send Email","slug":"send-email","isPaused":false,"isArchived":false,"triggers":[{"type":"EVENT","value":"user/signup"}],"app":{"id":"app-1"}}]`
 
-const getFunctionResponse = `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1","name":"billing-app","externalID":"billing-app","appVersion":"1.0.0"}}]}],"page":{"page":1,"totalPages":1}}}}`
+const getFunctionResponse = `[{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","isPaused":false,"isArchived":false,"triggers":[{"type":"EVENT","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1"}}]`
 
-const getFunctionWithConfigResponse = `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1","name":"billing-app","externalID":"billing-app","appVersion":"1.0.0"}}]}],"page":{"page":1,"totalPages":1}}}}`
+const getFunctionWithConfigResponse = `[{"id":"fn-1","name":"Process Payment","slug":"process-payment","url":"https://example.com/api/inngest","isPaused":false,"isArchived":false,"triggers":[{"type":"EVENT","value":"payment/created"}],"configuration":{"retries":{"value":3,"isDefault":false}},"app":{"id":"app-1"}}]`
+
+// functionsRoutes stubs the v2 apps + per-app functions endpoints that
+// ListFunctions/GetFunction hit; functionsJSON is the array served for app-1.
+func functionsRoutes(functionsJSON string) map[string]http.HandlerFunc {
+	return map[string]http.HandlerFunc{
+		"/v2/apps":                 jsonOK(`{"data":[{"id":"app-1","name":"billing-app","externalID":"billing-app","appVersion":"1.0.0"}],"page":{"hasMore":false}}`),
+		"/v2/apps/app-1/functions": jsonOK(`{"data":` + functionsJSON + `,"page":{"hasMore":false}}`),
+	}
+}
 
 // setupFunctionsTestState configures global state for cloud-mode tests.
 func setupFunctionsTestState(t *testing.T, srvURL string) {
@@ -202,9 +210,7 @@ func setupFunctionsTestState(t *testing.T, srvURL string) {
 }
 
 func TestFunctionsList_Success(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": listFunctionsResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(listFunctionsResponse))
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
@@ -238,9 +244,7 @@ func TestFunctionsList_Success(t *testing.T) {
 }
 
 func TestFunctionsList_AppFilter(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": listFunctionsResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(listFunctionsResponse))
 	defer srv.Close()
 
 	// Both functions belong to "billing-app", so --app billing-app should return 2.
@@ -301,9 +305,7 @@ func TestFunctionsList_AppFilter(t *testing.T) {
 }
 
 func TestFunctionsList_Table(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": listFunctionsResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(listFunctionsResponse))
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
@@ -330,10 +332,7 @@ func TestFunctionsList_Table(t *testing.T) {
 }
 
 func TestFunctionsGet_Success(t *testing.T) {
-	// GetFunction calls ListFunctions internally, so use same operation name.
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": getFunctionResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(getFunctionResponse))
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
@@ -364,9 +363,7 @@ func TestFunctionsGet_Success(t *testing.T) {
 }
 
 func TestFunctionsConfig_JSON(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": getFunctionWithConfigResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(getFunctionWithConfigResponse))
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
@@ -403,9 +400,7 @@ func TestFunctionsConfig_JSON(t *testing.T) {
 }
 
 func TestFunctionsConfig_Text(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": getFunctionWithConfigResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(getFunctionWithConfigResponse))
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
@@ -445,9 +440,7 @@ func TestFunctionsCmd_BareHelp(t *testing.T) {
 }
 
 func TestFunctionsGet_TextOutput(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": getFunctionResponse,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(getFunctionResponse))
 	defer srv.Close()
 
 	setupFunctionsTestState(t, srv.URL)
@@ -478,9 +471,9 @@ func TestFunctionsGet_TextOutput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFunctionsList_Error(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/apps": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+	})
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
 
@@ -500,9 +493,7 @@ func TestFunctionsList_Error(t *testing.T) {
 }
 
 func TestFunctionsGet_Error(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": `{"data":null,"errors":[{"message":"not found"}]}`,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(`[]`))
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
 
@@ -539,9 +530,7 @@ func TestPrintConfiguration_RetriesDefault(t *testing.T) {
 }
 
 func TestFunctionsConfig_Error(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": `{"data":null,"errors":[{"message":"not found"}]}`,
-	}, nil)
+	srv := newMockServer(t, nil, functionsRoutes(`[]`))
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
 
@@ -562,10 +551,8 @@ func TestFunctionsConfig_Error(t *testing.T) {
 
 func TestFunctionsConfig_TextNoConfig(t *testing.T) {
 	// Return a function without configuration to test the "No configuration" branch.
-	resp := `{"data":{"events":{"data":[{"workflows":[{"id":"fn-1","name":"Test","slug":"test-fn","isPaused":false,"isArchived":false,"triggers":[{"type":"event","value":"test/event"}],"app":{"id":"app-1","name":"test-app","externalID":"test-app"}}]}],"page":{"page":1,"totalPages":1}}}}`
-	srv := newMockServer(t, map[string]string{
-		"ListFunctions": resp,
-	}, nil)
+	resp := `[{"id":"fn-1","name":"Test","slug":"test-fn","isPaused":false,"isArchived":false,"triggers":[{"type":"EVENT","value":"test/event"}],"app":{"id":"app-1"}}]`
+	srv := newMockServer(t, nil, functionsRoutes(resp))
 	defer srv.Close()
 	setupFunctionsTestState(t, srv.URL)
 	state.Output = testOutputText
@@ -633,5 +620,77 @@ func TestPrintFunctionsTable_StatusColumn(t *testing.T) {
 	}
 	if statuses["archived"] != 2 {
 		t.Errorf("expected 2 archived rows (archived beats paused), got %d\n%s", statuses["archived"], out)
+	}
+}
+
+func TestFunctionsInvoke(t *testing.T) {
+	routes := functionsRoutes(listFunctionsResponse)
+	var gotBody map[string]any
+	routes["/v2/apps/app-1/functions/fn-1/invoke"] = func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s", r.Method)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		jsonOK(`{"data":{"runId":"01RUN"}}`)(w, r)
+	}
+	routes["/v2/runs/01RUN"] = jsonOK(`{"data":{"id":"01RUN","status":"COMPLETED","function":{"id":"fn-1","name":"Process Payment","slug":"process-payment"},"output":{"ok":true}}}`)
+	routes["/v2/runs/01RUN/trace"] = jsonStatus(http.StatusNotFound, `{"errors":[]}`)
+	srv := newMockServer(t, nil, routes)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+
+	orig := isInteractiveFn
+	isInteractiveFn = func() bool { return true }
+	t.Cleanup(func() { isInteractiveFn = orig })
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"invoke", "process-payment", "--data", `{"orderId":"o1"}`, "--idempotency-key", "k1"})
+	cmd.SetOut(&bytes.Buffer{})
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if !strings.Contains(got, `"01RUN"`) {
+		t.Errorf("expected run id in output, got %s", got)
+	}
+	if data, _ := gotBody["data"].(map[string]any); data["orderId"] != "o1" || gotBody["idempotencyKey"] != "k1" {
+		t.Errorf("invoke body = %v", gotBody)
+	}
+
+	// --wait polls the run and prints its final state; nil data is sent as {}.
+	gotBody = nil
+	cmd = NewFunctionsCmd()
+	cmd.SetArgs([]string{"invoke", "fn-1", "--wait"})
+	cmd.SetOut(&bytes.Buffer{})
+	got = captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if !strings.Contains(got, `"COMPLETED"`) {
+		t.Errorf("--wait output = %s", got)
+	}
+	if data, ok := gotBody["data"].(map[string]any); !ok || len(data) != 0 {
+		t.Errorf("empty data should be sent as {}, got %v", gotBody["data"])
+	}
+	if _, ok := gotBody["idempotencyKey"]; ok {
+		t.Error("idempotencyKey should be omitted when unset")
+	}
+
+	// Unknown function and invalid JSON fail before any invoke request.
+	cmd = NewFunctionsCmd()
+	cmd.SetArgs([]string{"invoke", "nope"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unknown function err = %v", err)
+	}
+	cmd = NewFunctionsCmd()
+	cmd.SetArgs([]string{"invoke", "fn-1", "--data", "{bad"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "invalid JSON input") {
+		t.Errorf("invalid data err = %v", err)
 	}
 }

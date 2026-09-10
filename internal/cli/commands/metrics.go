@@ -6,7 +6,6 @@ import (
 	"io"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -24,21 +23,17 @@ const maxPages = 50
 // or the page limit is reached.
 func paginateRuns(ctx context.Context, client *inngest.Client, opts inngest.ListRunsOptions, w io.Writer) ([]inngest.FunctionRun, bool, error) {
 	var allRuns []inngest.FunctionRun
-	cursor := opts.After
 	truncated := false
 	for page := 0; ; page++ {
-		opts.After = cursor
-		conn, err := client.ListRuns(ctx, opts)
+		result, err := client.ListRuns(ctx, opts)
 		if err != nil {
 			return nil, false, err
 		}
-		for _, edge := range conn.Edges {
-			allRuns = append(allRuns, edge.Node)
-		}
-		if !conn.PageInfo.HasNextPage || conn.PageInfo.EndCursor == "" {
+		allRuns = append(allRuns, result.Runs...)
+		if !result.Page.HasMore || result.Page.Cursor == "" {
 			break
 		}
-		cursor = conn.PageInfo.EndCursor
+		opts.After = result.Page.Cursor
 		if page+1 >= maxPages {
 			fmt.Fprintf(w, "Warning: pagination limit reached (%d pages). Results may be incomplete.\n", maxPages)
 			truncated = true
@@ -56,7 +51,10 @@ func computeMetrics(allRuns []inngest.FunctionRun, since string, truncated bool)
 
 	for _, run := range allRuns {
 		statusCounts[run.Status]++
-		if run.StartedAt != nil && run.EndedAt != nil {
+		switch {
+		case run.DurationMs > 0:
+			durations = append(durations, time.Duration(run.DurationMs)*time.Millisecond)
+		case run.StartedAt != nil && run.EndedAt != nil:
 			durations = append(durations, run.EndedAt.Sub(*run.StartedAt))
 		}
 	}
@@ -144,7 +142,7 @@ func NewHealthCmd() *cobra.Command {
 			cfg := state.Config
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
+			ctx := cmd.Context()
 
 			type checkResult struct {
 				Check  string `json:"check"`
@@ -155,18 +153,18 @@ func NewHealthCmd() *cobra.Command {
 			var results []checkResult
 			allPassed := true
 
-			// 1. Signing key configured
-			if sk := cfg.GetSigningKey(); sk != "" {
+			// 1. API credential configured
+			if cfg.GetAPICredential() != "" {
 				results = append(results, checkResult{
-					Check:  "signing_key",
+					Check:  "api_key",
 					Status: "ok",
 					Detail: "configured",
 				})
 			} else {
 				results = append(results, checkResult{
-					Check:  "signing_key",
+					Check:  "api_key",
 					Status: "fail",
-					Detail: "not configured — set INNGEST_SIGNING_KEY or run inngest auth login",
+					Detail: "not configured — set INNGEST_API_KEY / INNGEST_SIGNING_KEY or run inngest auth login",
 				})
 				allPassed = false
 			}
@@ -186,10 +184,9 @@ func NewHealthCmd() *cobra.Command {
 				})
 			}
 
-			// 3. API reachability (simple connectivity check)
-			var probe any
-			err := client.ExecuteGraphQL(ctx, "HealthCheck", `query HealthCheck { __typename }`, nil, &probe)
-			if err != nil {
+			// 3. API reachability + credential validity: an authenticated v2 call.
+			// A bad key surfaces here as a 401 instead of an empty result.
+			if _, err := client.ListEnvironments(ctx); err != nil {
 				results = append(results, checkResult{
 					Check:  "api",
 					Status: "fail",
@@ -200,27 +197,27 @@ func NewHealthCmd() *cobra.Command {
 				results = append(results, checkResult{
 					Check:  "api",
 					Status: "ok",
-					Detail: "reachable",
+					Detail: "reachable, credential accepted",
 				})
 			}
 
 			// 4. Dev server reachability (if --dev or auto-detect)
-			if state.DevMode || client.IsDevServerRunning(ctx) {
-				if client.IsDevServerRunning(ctx) {
-					results = append(results, checkResult{
-						Check:  "dev_server",
-						Status: "ok",
-						Detail: "reachable at " + state.DevServer,
-					})
-				} else {
-					results = append(results, checkResult{
-						Check:  "dev_server",
-						Status: "fail",
-						Detail: "not reachable at " + state.DevServer,
-					})
-					allPassed = false
-				}
-			} else {
+			devUp := client.IsDevServerRunning(ctx)
+			switch {
+			case devUp:
+				results = append(results, checkResult{
+					Check:  "dev_server",
+					Status: "ok",
+					Detail: "reachable at " + state.DevServer,
+				})
+			case state.DevMode:
+				results = append(results, checkResult{
+					Check:  "dev_server",
+					Status: "fail",
+					Detail: "not reachable at " + state.DevServer,
+				})
+				allPassed = false
+			default:
 				results = append(results, checkResult{
 					Check:  "dev_server",
 					Status: "skip",
@@ -267,6 +264,7 @@ func NewMetricsCmd() *cobra.Command {
 	var (
 		since    string
 		function string
+		app      string
 	)
 
 	cmd := &cobra.Command{
@@ -276,22 +274,19 @@ func NewMetricsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
 
-			duration, err := time.ParseDuration(since)
+			fromTime, err := parseSince("since", since)
 			if err != nil {
-				return fmt.Errorf("invalid --since duration %q: %w", since, err)
+				return err
 			}
-			fromTime := time.Now().Add(-duration)
 
 			opts := inngest.ListRunsOptions{
-				First: 100,
-				From:  fromTime,
+				First:       inngest.MaxRunsPageSize,
+				From:        fromTime,
+				FunctionIDs: splitCSV(function),
+				AppIDs:      splitCSV(app),
 			}
-			if function != "" {
-				opts.FunctionIDs = []string{function}
-			}
-			allRuns, truncated, err := paginateRuns(ctx, client, opts, cmd.ErrOrStderr())
+			allRuns, truncated, err := paginateRuns(cmd.Context(), client, opts, cmd.ErrOrStderr())
 			if err != nil {
 				return fmt.Errorf("querying runs: %w", err)
 			}
@@ -307,8 +302,9 @@ func NewMetricsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&since, "since", "24h", "Time period to query (e.g. 1h, 24h, 7d)")
-	cmd.Flags().StringVar(&function, "function", "", "Filter by function ID")
+	cmd.Flags().StringVar(&since, "since", "24h", "Time period to query (e.g. 1h, 24h, 168h)")
+	cmd.Flags().StringVar(&function, "function", "", "Filter by function ID (comma-separated)")
+	cmd.Flags().StringVar(&app, "app", "", "Filter by app ID (comma-separated)")
 
 	return cmd
 }
@@ -361,25 +357,16 @@ func NewBacklogCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
 
-			// Fetch running and queued runs.
-			var allRuns []inngest.FunctionRun
-			truncated := false
-			for _, status := range []string{"RUNNING", "QUEUED"} {
-				opts := inngest.ListRunsOptions{
-					First:  100,
-					Status: []string{status},
-					From:   time.Now().Add(-24 * time.Hour),
-				}
-				runs, trunc, err := paginateRuns(ctx, client, opts, cmd.ErrOrStderr())
-				if err != nil {
-					return fmt.Errorf("querying %s runs: %w", strings.ToLower(status), err)
-				}
-				allRuns = append(allRuns, runs...)
-				if trunc {
-					truncated = true
-				}
+			// One server-side filtered query for both statuses.
+			opts := inngest.ListRunsOptions{
+				First:  inngest.MaxRunsPageSize,
+				Status: []string{"RUNNING", "QUEUED"},
+				From:   time.Now().Add(-24 * time.Hour),
+			}
+			allRuns, truncated, err := paginateRuns(cmd.Context(), client, opts, cmd.ErrOrStderr())
+			if err != nil {
+				return fmt.Errorf("querying runs: %w", err)
 			}
 
 			entries := groupRunsByFunction(allRuns)

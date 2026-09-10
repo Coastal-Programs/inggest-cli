@@ -1,14 +1,28 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/commands"
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 	"github.com/Coastal-Programs/inggest-cli/pkg/output"
+)
+
+// Exit codes, modelled on gh: scripts and agents can branch on them.
+const (
+	ExitOK     = 0
+	ExitError  = 1
+	ExitCancel = 2 // interrupted (Ctrl+C / SIGTERM)
+	ExitAuth   = 4 // the API rejected the credential
 )
 
 var (
@@ -18,17 +32,33 @@ var (
 	flagAPIURL   string
 	flagDev      bool
 	flagDevURL   string
+	flagTimeout  time.Duration
 )
 
-// Execute runs the root command.
-func Execute(version string) error {
+// Execute runs the root command and returns the process exit code.
+// Ctrl+C / SIGTERM cancel the command context so in-flight requests abort.
+func Execute(version string) int {
 	state.AppVersion = version
-	root := newRootCmd()
-	if err := root.Execute(); err != nil {
-		output.PrintError(err.Error(), nil)
-		return err
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := newRootCmd().ExecuteContext(ctx)
+	if err == nil {
+		return ExitOK
 	}
-	return nil
+	output.PrintError(err.Error(), nil)
+	return exitCodeFor(ctx, err)
+}
+
+func exitCodeFor(ctx context.Context, err error) int {
+	switch {
+	case ctx.Err() != nil || errors.Is(err, context.Canceled):
+		return ExitCancel
+	case inngest.IsAuthError(err):
+		return ExitAuth
+	default:
+		return ExitError
+	}
 }
 
 func newRootCmd() *cobra.Command {
@@ -74,6 +104,7 @@ Works with both Inngest Cloud and local dev server.`,
 
 			state.DevMode = flagDev
 			state.Output = outputFormat
+			state.Timeout = flagTimeout
 
 			return nil
 		},
@@ -84,6 +115,7 @@ Works with both Inngest Cloud and local dev server.`,
 	cmd.PersistentFlags().StringVar(&flagAPIURL, "api-url", "", "Override API base URL (for self-hosted Inngest)")
 	cmd.PersistentFlags().BoolVar(&flagDev, "dev", false, "Target local dev server instead of Inngest Cloud")
 	cmd.PersistentFlags().StringVar(&flagDevURL, "dev-url", "", "Override dev server URL")
+	cmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 30*time.Second, "Per-request timeout (e.g. 10s, 2m)")
 
 	cmd.SetErr(os.Stderr)
 	cmd.SetOut(os.Stdout)
@@ -100,6 +132,8 @@ Works with both Inngest Cloud and local dev server.`,
 	cmd.AddCommand(commands.NewHealthCmd())
 	cmd.AddCommand(commands.NewMetricsCmd())
 	cmd.AddCommand(commands.NewBacklogCmd())
+	cmd.AddCommand(commands.NewAppsCmd())
+	cmd.AddCommand(commands.NewAPICmd())
 
 	return cmd
 }

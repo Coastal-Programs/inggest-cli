@@ -1,13 +1,18 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
 func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
@@ -16,6 +21,7 @@ func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
 	expected := []string{
 		"auth", "version", "config", "dev", "events",
 		"functions", "runs", "env", "health", "metrics", "backlog",
+		"apps", "api",
 	}
 
 	subs := cmd.Commands()
@@ -34,7 +40,7 @@ func TestNewRootCmd_HasAllSubcommands(t *testing.T) {
 func TestNewRootCmd_GlobalFlags(t *testing.T) {
 	cmd := newRootCmd()
 
-	expectedFlags := []string{"output", "env", "api-url", "dev", "dev-url"}
+	expectedFlags := []string{"output", "env", "api-url", "dev", "dev-url", "timeout"}
 	for _, name := range expectedFlags {
 		if cmd.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("missing persistent flag %q", name)
@@ -85,11 +91,66 @@ func TestExecute_SetsVersion(t *testing.T) {
 	// Reset before test
 	state.AppVersion = ""
 
-	if err := Execute("v1.2.3"); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
+	if code := Execute("v1.2.3"); code != ExitOK {
+		t.Fatalf("Execute returned exit code %d", code)
 	}
 	if state.AppVersion != "v1.2.3" {
 		t.Errorf("expected AppVersion %q, got %q", "v1.2.3", state.AppVersion)
+	}
+}
+
+func TestExitCodeFor(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want int
+	}{
+		{"generic error", context.Background(), errors.New("boom"), ExitError},
+		{"auth error", context.Background(), &inngest.APIError{StatusCode: http.StatusUnauthorized}, ExitAuth},
+		{"wrapped auth error", context.Background(), errors.Join(errors.New("listing runs"), &inngest.APIError{StatusCode: http.StatusForbidden}), ExitAuth},
+		{"interrupted", cancelled, errors.New("request cancelled"), ExitCancel},
+		{"context.Canceled", context.Background(), context.Canceled, ExitCancel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := exitCodeFor(tt.ctx, tt.err); got != tt.want {
+				t.Errorf("exitCodeFor() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExecute_BadCredentialExitsAuth guards the contract that a rejected key
+// never yields exit 0 (agents and CI branch on this).
+func TestExecute_BadCredentialExitsAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"authorization_header_missing","message":"authorization header missing or invalid"}]}`))
+	}))
+	defer srv.Close()
+
+	cfgPath := filepath.Join(t.TempDir(), "cli.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"signing_key":"signkey-test-abcd"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	t.Setenv("INNGEST_API_KEY", "")
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"env", "list", "--api-url", srv.URL})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for a rejected credential")
+	}
+	if got := exitCodeFor(context.Background(), err); got != ExitAuth {
+		t.Errorf("exit code = %d, want %d (err: %v)", got, ExitAuth, err)
 	}
 }
 

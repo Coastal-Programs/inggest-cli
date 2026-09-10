@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -26,6 +25,7 @@ func NewFunctionsCmd() *cobra.Command {
 	cmd.AddCommand(newFunctionsListCmd())
 	cmd.AddCommand(newFunctionsGetCmd())
 	cmd.AddCommand(newFunctionsConfigCmd())
+	cmd.AddCommand(newFunctionsInvokeCmd())
 	return cmd
 }
 
@@ -39,19 +39,17 @@ func newFunctionsListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
 
-			functions, err := client.ListFunctions(ctx)
+			functions, err := client.ListFunctions(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("listing functions: %w", err)
 			}
 
-			// Filter by app name if specified.
+			// Filter by app name or ID if specified.
 			if appFilter != "" {
-				var filtered []inngest.Function
-				lower := strings.ToLower(appFilter)
+				filtered := []inngest.Function{}
 				for _, fn := range functions {
-					if fn.App != nil && strings.ToLower(fn.App.Name) == lower {
+					if fn.App != nil && (strings.EqualFold(fn.App.Name, appFilter) || fn.App.ID == appFilter) {
 						filtered = append(filtered, fn)
 					}
 				}
@@ -66,7 +64,7 @@ func newFunctionsListCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&appFilter, "app", "", "Filter by app name")
+	cmd.Flags().StringVar(&appFilter, "app", "", "Filter by app name or ID")
 
 	return cmd
 }
@@ -111,16 +109,15 @@ func printFunctionsTable(functions []inngest.Function) error {
 
 func newFunctionsGetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <slug>",
-		Short: "Get detailed function info by slug",
+		Use:   "get <slug-or-id>",
+		Short: "Get detailed function info by slug or ID",
 		Long:  "Fetch full function details including triggers, configuration, retries, concurrency, and rate limits.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
 
-			fn, err := client.GetFunction(ctx, args[0])
+			fn, err := client.GetFunction(cmd.Context(), args[0])
 			if err != nil {
 				return fmt.Errorf("getting function: %w", err)
 			}
@@ -223,16 +220,15 @@ func printConfiguration(cfg *inngest.FunctionConfiguration) {
 
 func newFunctionsConfigCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "config <slug>",
+		Use:   "config <slug-or-id>",
 		Short: "Show function configuration (concurrency, throttle, retry, etc.)",
-		Long:  "Fetch a function by slug and display its configuration details.",
+		Long:  "Fetch a function by slug or ID and display its configuration details.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
 
-			fn, err := client.GetFunction(ctx, args[0])
+			fn, err := client.GetFunction(cmd.Context(), args[0])
 			if err != nil {
 				return fmt.Errorf("getting function config: %w", err)
 			}
@@ -265,4 +261,74 @@ func buildConfigOutput(fn *inngest.Function) map[string]any {
 	}
 
 	return result
+}
+
+func newFunctionsInvokeCmd() *cobra.Command {
+	var (
+		data           string
+		dataFile       string
+		idempotencyKey string
+		wait           bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "invoke <slug-or-id>",
+		Short: "Invoke a function directly",
+		Long: `Invoke a function with the given event data and print the run ID.
+
+Data comes from --data, --data-file ("-" for stdin), or piped stdin. Use --wait to
+block until the run finishes and print its status and output.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newCloudClient()
+			format := output.Format(state.Output)
+			ctx := cmd.Context()
+
+			eventData, err := readJSONInput(data, dataFile)
+			if err != nil {
+				return err
+			}
+
+			appID, functionID := "", args[0]
+			if !state.DevMode {
+				fn, err := client.GetFunction(ctx, args[0])
+				if err != nil {
+					return fmt.Errorf("resolving function: %w", err)
+				}
+				if fn.App == nil || fn.App.ID == "" {
+					return fmt.Errorf("function %q has no app ID", args[0])
+				}
+				appID, functionID = fn.App.ID, fn.ID
+			}
+
+			result, err := client.InvokeFunction(ctx, appID, functionID, eventData, idempotencyKey)
+			if err != nil {
+				return fmt.Errorf("invoking function: %w", err)
+			}
+
+			if !wait || result.RunID == "" {
+				return output.Print(result, format)
+			}
+
+			run, err := client.GetRun(ctx, result.RunID)
+			if err != nil {
+				return fmt.Errorf("getting run: %w", err)
+			}
+			run, err = waitForRun(ctx, client, run)
+			if err != nil {
+				return err
+			}
+			if format == output.FormatText {
+				return printRunDetail(run)
+			}
+			return output.Print(run, format)
+		},
+	}
+
+	cmd.Flags().StringVarP(&data, "data", "d", "", "Event data as a JSON string")
+	cmd.Flags().StringVar(&dataFile, "data-file", "", `Read event data from a file ("-" for stdin)`)
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Deduplicate repeated invocations with the same key")
+	cmd.Flags().BoolVar(&wait, "wait", false, "Poll until the run finishes and print its result")
+
+	return cmd
 }

@@ -25,11 +25,18 @@ inngest-cli/
 │   │       ├── env.go           # inngest env list/use/get
 │   │       ├── dev.go           # inngest dev status/functions/runs/send/invoke/events
 │   │       ├── metrics.go       # inngest health/metrics/backlog
+│   │       ├── apps.go          # inngest apps list/get/sync
+│   │       ├── api.go           # inngest api — raw REST passthrough
 │   │       ├── config.go        # inngest config show/get/set/path
 │   │       └── version.go       # inngest version
 │   │
 │   ├── inngest/
-│   │   └── client.go            # API client — GraphQL, REST, and dev server
+│   │   ├── client.go            # HTTP core: auth header, retry, plaintext guard
+│   │   ├── restv2.go            # REST v2 envelope/error decoding (APIError, Page)
+│   │   ├── runs.go / functions.go / apps.go / environments.go / events.go
+│   │   ├── devgraphql.go        # dev-server GraphQL aliased into the same types
+│   │   ├── raw.go               # RawRequest for `inngest api`
+│   │   └── types.go             # v2-shaped types
 │   │
 │   └── common/
 │       └── config/
@@ -59,23 +66,24 @@ The API client (`internal/inngest/client.go`) supports three authentication mode
 
 | Mode | Auth Mechanism | Used For |
 |------|---------------|----------|
-| Signing key | `Authorization: Bearer signkey-...` | GraphQL API (functions, runs, environments) and REST endpoints |
-| Event key | Included in event payload URL | Sending events to Inngest Cloud |
+| API key | `Authorization: Bearer <api-key>` (sent as-is) | REST API v2/v1 — recommended for CLI, CI and agents |
+| Signing key | `Authorization: Bearer <sha256 of key bytes>` | REST API v2/v1 (hashed per the SDK convention; the raw key never leaves the machine) |
+| Event key | Included in event payload URL | Event API (`inn.gs/e/<key>`); optional — `POST /v2/events` works without it |
 | No auth | None | Local dev server (http://localhost:8288) |
 
-The `--dev` flag switches all requests to the local dev server, bypassing cloud authentication entirely.
+Credentials are only attached to `https://` requests or loopback hosts. The `--dev` flag switches all requests to the local dev server, bypassing cloud authentication entirely.
 
-### GraphQL vs REST
+### REST v2, v1 and the dev server
 
-- **GraphQL** (`api.inngest.com/gql`) — used for querying functions, runs, environments, and metrics
-- **REST** (`api.inngest.com/v1/`) — used for sending events and certain CRUD operations
-- **Dev Server** (`localhost:8288/v0/`) — local API with its own schema
+- **REST v2** (`api.inngest.com/v2/`, [OpenAPI](https://api-docs.inngest.com/api-specs/v2.json)) — runs, traces, cancel/rerun, apps, functions, invoke, envs, event schemas. Responses are `{data, page{cursor,hasMore}, metadata}`; errors `{errors:[{code,message}]}` become `*APIError`.
+- **REST v1** (`api.inngest.com/v1/`) — event listing/lookup.
+- **Dev Server** (`localhost:8288`) — `/api/v2/{health,envs}` plus its GraphQL API (`/v0/gql`) for runs/functions/apps, aliased into the same Go types so commands are backend-agnostic.
 
 ---
 
 ## Config System
 
-Config file: `~/.config/inngest/cli.json` (0600 permissions)
+Config file: OS config dir — `~/.config/inngest/cli.json` (Linux), `~/Library/Application Support/inngest/cli.json` (macOS) — 0600 permissions
 
 ### Environment Variable Fallbacks
 
@@ -121,5 +129,5 @@ Every command calls `output.Print(data, format)` — format is never hard-coded 
 | Language | Go 1.23 | Fast binary, easy cross-compilation, strong stdlib |
 | CLI framework | Cobra v1.8.1 | Standard Go CLI framework, subcommand support |
 | Output format | JSON (default) | Machine-readable for AI agent consumption |
-| Config | `~/.config/inngest/cli.json` | Standard XDG location, 0600 permissions |
+| Config | `os.UserConfigDir()/inngest/cli.json` | Standard per-OS location, 0600 permissions |
 | Build injection | Go ldflags | Embeds version at compile time |

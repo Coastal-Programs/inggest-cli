@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,10 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrPlaintextCredentials is returned when a request would send a credential
+// over plaintext HTTP to a non-loopback host.
+var ErrPlaintextCredentials = errors.New("inngest: refusing to send credentials over plaintext HTTP to a non-local host (use https://)")
 
 var signingKeyPrefixRegexp = regexp.MustCompile(`^signkey-\w+-`)
 
@@ -46,6 +51,7 @@ type ClientOptions struct {
 	DevServerURL       string // default: http://localhost:8288
 	DevMode            bool
 	UserAgent          string
+	Timeout            time.Duration // per-request timeout; default 30s
 }
 
 // NewClient creates a new Inngest API client.
@@ -65,6 +71,11 @@ func NewClient(opts ClientOptions) *Client {
 	ua := opts.UserAgent
 	if ua == "" {
 		ua = "inngest-cli/dev"
+	}
+
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
 
 	transport := &http.Transport{
@@ -90,7 +101,7 @@ func NewClient(opts ClientOptions) *Client {
 		devMode:            opts.DevMode,
 		userAgent:          ua,
 		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
+			Timeout:   timeout,
 			Transport: transport,
 		},
 	}
@@ -113,13 +124,10 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 
 	req.Header.Set("User-Agent", c.userAgent)
 	if c.signingKey != "" {
-		hashed, err := HashSigningKey(c.signingKey)
-		if err != nil {
-			// Fall back to raw key if hashing fails (e.g. non-hex self-hosted key).
-			req.Header.Set("Authorization", "Bearer "+c.signingKey)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+hashed)
+		if err := guardPlaintextAuth(req); err != nil {
+			return nil, err
 		}
+		req.Header.Set("Authorization", "Bearer "+bearerToken(c.signingKey))
 	}
 	if c.env != "" && !c.devMode {
 		req.Header.Set("X-Inngest-Env", c.env)
@@ -133,16 +141,42 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	// If auth failed and we have a fallback key, retry with it.
 	if resp.StatusCode == http.StatusUnauthorized && c.signingKeyFallback != "" {
 		_ = resp.Body.Close()
-		hashed, err := HashSigningKey(c.signingKeyFallback)
-		if err != nil {
-			req.Header.Set("Authorization", "Bearer "+c.signingKeyFallback)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+hashed)
-		}
+		req.Header.Set("Authorization", "Bearer "+bearerToken(c.signingKeyFallback))
 		return c.doWithRetry(req, bodyBytes)
 	}
 
 	return resp, nil
+}
+
+// bearerToken returns the credential to send: signing keys are hashed per the
+// SDK convention so the raw key never leaves the machine; API keys (no
+// "signkey-" prefix) are sent as-is.
+func bearerToken(key string) string {
+	if !signingKeyPrefixRegexp.MatchString(key) {
+		return key
+	}
+	hashed, err := HashSigningKey(key)
+	if err != nil {
+		// Non-hex self-hosted key: the server accepts the raw form too.
+		return key
+	}
+	return hashed
+}
+
+// guardPlaintextAuth refuses to attach credentials to an http:// request unless
+// the host is loopback (the local dev server). Mirrors the official Inngest CLI.
+func guardPlaintextAuth(req *http.Request) error {
+	if req.URL.Scheme != "http" {
+		return nil
+	}
+	host := req.URL.Hostname()
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return ErrPlaintextCredentials
 }
 
 // doWithRetry executes the request with retry logic for 429 Too Many Requests.
@@ -181,7 +215,12 @@ func (c *Client) doWithRetry(req *http.Request, bodyBytes []byte) (*http.Respons
 			}
 		}
 
-		time.Sleep(wait)
+		// Honour cancellation (Ctrl+C, --timeout) while backing off.
+		select {
+		case <-req.Context().Done():
+			return nil, fmt.Errorf("request cancelled while rate limited: %w", req.Context().Err())
+		case <-time.After(wait):
+		}
 	}
 
 	return resp, nil
@@ -229,10 +268,15 @@ func (c *Client) restURL(path string) string {
 	return base + "/v1/" + strings.TrimLeft(path, "/")
 }
 
-// eventURL returns the event ingestion URL.
+// eventURL returns the event ingestion URL. The dev server accepts any event
+// key, so a placeholder is used there when none is configured.
 func (c *Client) eventURL() string {
 	if c.devMode {
-		return c.devServerURL + "/e/" + c.eventKey
+		key := c.eventKey
+		if key == "" {
+			key = "test"
+		}
+		return c.devServerURL + "/e/" + key
 	}
 	return defaultEventHost + "/e/" + c.eventKey
 }

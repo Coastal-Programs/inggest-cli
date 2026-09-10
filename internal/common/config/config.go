@@ -13,6 +13,8 @@ import (
 
 // Config holds all Inngest CLI settings and credentials.
 type Config struct {
+	// APIKey is an Inngest API key (recommended for CLI/CI use); takes precedence over SigningKey
+	APIKey string `json:"api_key,omitempty"`
 	// SigningKey is used for REST API auth (Bearer token)
 	SigningKey string `json:"signing_key,omitempty"`
 	// SigningKeyFallback is used when the primary signing key fails (e.g. during key rotation)
@@ -109,10 +111,33 @@ func (c *Config) Save() error {
 	return nil
 }
 
+// GetAPIKey returns the API key, preferring INNGEST_API_KEY env var over config.
+func (c *Config) GetAPIKey() string {
+	if v := os.Getenv("INNGEST_API_KEY"); v != "" {
+		return v
+	}
+	return c.APIKey
+}
+
 // GetSigningKey returns the signing key, preferring INNGEST_SIGNING_KEY env var over config.
 func (c *Config) GetSigningKey() string {
 	if v := os.Getenv("INNGEST_SIGNING_KEY"); v != "" {
 		return v
+	}
+	return c.SigningKey
+}
+
+// GetAPICredential returns the Bearer credential for the REST API:
+// INNGEST_API_KEY > INNGEST_SIGNING_KEY > config api_key > config signing_key.
+func (c *Config) GetAPICredential() string {
+	if v := os.Getenv("INNGEST_API_KEY"); v != "" {
+		return v
+	}
+	if v := os.Getenv("INNGEST_SIGNING_KEY"); v != "" {
+		return v
+	}
+	if c.APIKey != "" {
+		return c.APIKey
 	}
 	return c.SigningKey
 }
@@ -157,9 +182,9 @@ func (c *Config) GetActiveEnv() string {
 	return "production"
 }
 
-// IsConfigured reports whether a signing key or event key is available.
+// IsConfigured reports whether an API credential or event key is available.
 func (c *Config) IsConfigured() bool {
-	return c.GetSigningKey() != "" || c.GetEventKey() != ""
+	return c.GetAPICredential() != "" || c.GetEventKey() != ""
 }
 
 // Redact masks a secret string, showing first 4 + **** + last 4 characters.

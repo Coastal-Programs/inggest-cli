@@ -80,3 +80,27 @@ func setupCloudState(t *testing.T, srvURL string) {
 	state.Env = ""
 	state.AppVersion = testAppVersion
 }
+
+const (
+	testOutputTable = "table"
+	testOutputText  = "text"
+	testFnID        = "fn-1"
+	queryTrue       = "true"
+)
+
+// jsonOK returns a handler that serves body as application/json with status 200.
+func jsonOK(body string) http.HandlerFunc {
+	return jsonStatus(http.StatusOK, body)
+}
+
+// jsonStatus returns a handler that serves body as application/json with status.
+func jsonStatus(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+// v2Unauthorized is the REST v2 body for a rejected credential.
+const v2Unauthorized = `{"errors":[{"code":"authorization_header_missing","message":"authorization header missing or invalid"}]}`

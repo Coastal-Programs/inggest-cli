@@ -1,10 +1,7 @@
 package commands
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -33,7 +30,6 @@ func NewEnvCmd() *cobra.Command {
 // envRow is used for table output of env list.
 type envRow struct {
 	Name   string
-	Slug   string
 	Type   string
 	ID     string
 	Active string
@@ -43,40 +39,33 @@ func newEnvListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List all environments",
-		Long:  "List all environments registered with Inngest Cloud.",
+		Long:  "List the environments of the account that owns the configured key.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
 
-			envs, err := client.ListEnvironments(ctx)
+			envs, err := client.ListEnvironments(cmd.Context())
 			if err != nil {
-				if errors.Is(err, inngest.ErrAccountAuthRequired) || strings.Contains(strings.ToLower(err.Error()), "authenticat") {
-					return printCurrentEnvFallback(format, err)
-				}
 				return fmt.Errorf("listing environments: %w", err)
 			}
 
 			if format == output.FormatTable {
 				return printEnvTable(envs)
 			}
-
 			return output.Print(envs, format)
 		},
 	}
 }
 
 func printEnvTable(envs []inngest.Environment) error {
-	activeEnv := state.Env
 	rows := make([]envRow, len(envs))
 	for i, env := range envs {
 		active := ""
-		if strings.EqualFold(env.Name, activeEnv) || strings.EqualFold(env.Slug, activeEnv) {
+		if strings.EqualFold(env.Name, state.Env) {
 			active = "◀"
 		}
 		rows[i] = envRow{
 			Name:   env.Name,
-			Slug:   env.Slug,
 			Type:   env.Type,
 			ID:     env.ID,
 			Active: active,
@@ -111,26 +100,20 @@ func newEnvGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <name-or-id>",
 		Short: "Get environment details",
-		Long:  "Fetch environment details by name, slug, or ID.",
+		Long:  "Fetch environment details by name or ID.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newCloudClient()
 			format := output.Format(state.Output)
-			ctx := context.Background()
-			nameOrID := args[0]
 
-			env, err := client.GetEnvironment(ctx, nameOrID)
+			env, err := client.GetEnvironment(cmd.Context(), args[0])
 			if err != nil {
-				if errors.Is(err, inngest.ErrAccountAuthRequired) || strings.Contains(strings.ToLower(err.Error()), "authenticat") {
-					return printCurrentEnvFallback(format, err)
-				}
-				return fmt.Errorf("environment %q not found: %w", nameOrID, err)
+				return fmt.Errorf("getting environment: %w", err)
 			}
 
 			if format == output.FormatText {
 				return printEnvDetail(env)
 			}
-
 			return output.Print(env, format)
 		},
 	}
@@ -139,30 +122,10 @@ func newEnvGetCmd() *cobra.Command {
 func printEnvDetail(env *inngest.Environment) error {
 	fmt.Printf("Name:          %s\n", env.Name)
 	fmt.Printf("ID:            %s\n", env.ID)
-	fmt.Printf("Slug:          %s\n", env.Slug)
 	fmt.Printf("Type:          %s\n", env.Type)
 	if env.CreatedAt != nil {
 		fmt.Printf("Created:       %s\n", env.CreatedAt.Format("2006-01-02 15:04:05"))
 	}
-	fmt.Printf("Auto-Archive:  %v\n", env.IsAutoArchiveEnabled)
+	fmt.Printf("Archived:      %v\n", env.IsArchived)
 	return nil
-}
-
-// printCurrentEnvFallback shows the current environment from config when the
-// API requires account-level auth that we don't have. It prints a warning to
-// stderr, then outputs the locally-known environment info to stdout.
-func printCurrentEnvFallback(format output.Format, authErr error) error {
-	activeEnv := state.Config.GetActiveEnv()
-
-	// Print warning to stderr so structured output on stdout stays clean.
-	fmt.Fprintln(os.Stderr, "Warning: "+authErr.Error())
-	fmt.Fprintln(os.Stderr, "Showing current environment from local config instead.")
-	fmt.Fprintln(os.Stderr)
-
-	info := map[string]string{
-		"active_env": activeEnv,
-		"source":     "local_config",
-		"hint":       "Visit https://app.inngest.com/env to manage all environments",
-	}
-	return output.Print(info, format)
 }

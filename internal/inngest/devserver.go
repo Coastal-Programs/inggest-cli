@@ -1,7 +1,6 @@
 package inngest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,90 +60,4 @@ func (c *Client) IsDevServerRunning(ctx context.Context) bool {
 	}
 	_ = resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
-}
-
-// SendDevEvent sends an event to the dev server (POST /e/{key}).
-// Returns the list of event IDs created.
-func (c *Client) SendDevEvent(ctx context.Context, eventData any) ([]string, error) {
-	body, err := json.Marshal(eventData)
-	if err != nil {
-		return nil, fmt.Errorf("inngest: marshal event data: %w", err)
-	}
-
-	// Dev server accepts any event key; use the configured key or fall back to "test".
-	eventKey := c.eventKey
-	if eventKey == "" {
-		eventKey = "test"
-	}
-	url := c.devServerURL + "/e/" + eventKey
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("inngest: create send event request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.doEvent(req)
-	if err != nil {
-		return nil, fmt.Errorf("inngest: send event request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("inngest: read send event response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("inngest: send event returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
-	}
-
-	var result struct {
-		IDs    []string `json:"ids"`
-		Status int      `json:"status"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("inngest: unmarshal send event response: %w", err)
-	}
-
-	return result.IDs, nil
-}
-
-// InvokeDevFunction invokes a function on the dev server (POST /invoke/{slug}).
-// Returns the run ID.
-func (c *Client) InvokeDevFunction(ctx context.Context, slug string, data any) (string, error) {
-	body, err := json.Marshal(data)
-	if err != nil {
-		return "", fmt.Errorf("inngest: marshal invoke data: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.devURL("invoke/"+slug), bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("inngest: create invoke request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.do(req)
-	if err != nil {
-		return "", fmt.Errorf("inngest: invoke request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("inngest: read invoke response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("inngest: invoke returned status %d: %s", resp.StatusCode, truncateBody(string(respBody)))
-	}
-
-	var result struct {
-		ID     string `json:"id"`
-		Status int    `json:"status"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("inngest: unmarshal invoke response: %w", err)
-	}
-
-	return result.ID, nil
 }

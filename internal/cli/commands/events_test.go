@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
 )
 
 func TestEventsCmdHasSubcommands(t *testing.T) {
@@ -35,24 +37,34 @@ func TestEventsCmdHasSubcommands(t *testing.T) {
 	}
 }
 
-func TestEventsSendRequiresEventKey(t *testing.T) {
-	state.Config = &config.Config{}
-	state.Output = testOutputJSON
-	state.DevMode = false
+// Without an event key the event goes through the REST API with the signing key.
+func TestEventsSend_RESTWithoutEventKey(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/events": func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["name"] != "test/event" || body["id"] != "idem-1" {
+				t.Errorf("unexpected body: %v", body)
+			}
+			if r.Header.Get("Authorization") == "" {
+				t.Error("expected Authorization header on REST send")
+			}
+			jsonOK(`{"data":{"eventId":"evt-rest-1"}}`)(w, r)
+		},
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
 	t.Setenv("INNGEST_EVENT_KEY", "")
 
 	cmd := NewEventsCmd()
-	cmd.SetArgs([]string{"send", "test/event", "--data", "{}"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when no event key is set")
-	}
-	if !strings.Contains(err.Error(), "event key required") {
-		t.Errorf("expected error about event key required, got: %v", err)
+	cmd.SetArgs([]string{"send", "test/event", "--data", "{}", "--id", "idem-1"})
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if !strings.Contains(got, `"evt-rest-1"`) {
+		t.Errorf("expected REST event id in output, got: %s", got)
 	}
 }
 
@@ -94,8 +106,10 @@ func TestEventsListFlags(t *testing.T) {
 	if listCmd == nil {
 		t.Fatal("expected list subcommand")
 	}
-	if f := listCmd.Flags().Lookup("recent"); f == nil {
-		t.Error("expected --recent flag on list command")
+	for _, name := range []string{"limit", "since", "after"} {
+		if f := listCmd.Flags().Lookup(name); f == nil {
+			t.Errorf("expected --%s flag on list command", name)
+		}
 	}
 	if f := listCmd.Flags().Lookup("name"); f == nil {
 		t.Error("expected --name flag on list command")
@@ -232,8 +246,8 @@ func TestEventsSend_StdinInvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid stdin JSON")
 	}
-	if !strings.Contains(err.Error(), "invalid stdin JSON") {
-		t.Errorf("expected error about invalid stdin JSON, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid JSON input") {
+		t.Errorf("expected error about invalid JSON input, got: %v", err)
 	}
 }
 
@@ -316,124 +330,92 @@ func TestEventsSend_InvalidData(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON data")
 	}
-	if !strings.Contains(err.Error(), "invalid --data JSON") {
+	if !strings.Contains(err.Error(), "invalid JSON input") {
 		t.Errorf("expected error about invalid JSON, got: %v", err)
 	}
 }
 
-func TestEventsGet_GraphQLSuccess(t *testing.T) {
-	gqlResponses := map[string]string{
-		"GetEvent": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","name":"test/event","event":"{\"name\":\"test/event\"}","functionRuns":[{"id":"run-1","status":"COMPLETED","function":{"id":"fn-1","name":"My Func","slug":"my-func"}}]}]}]}}}`,
-	}
-	srv := newMockServer(t, gqlResponses, nil)
+const v1EventJSON = `{"data":{"internal_id":"evt-1","name":"test/event","data":{"userId":"1"},"ts":1704067200000,"received_at":"2024-01-01T00:00:00Z"}}`
+
+func TestEventsGet_Success(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events/evt-1":      jsonOK(v1EventJSON),
+		"/v2/events/evt-1/runs": jsonOK(`{"data":[{"id":"run-1","status":"COMPLETED","function":{"id":"fn-1","name":"My Func","slug":"my-func"},"trigger":{"eventName":"test/event"}}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
-
-	t.Setenv("INNGEST_SIGNING_KEY", "")
-	t.Setenv("INNGEST_EVENT_KEY", "")
-
-	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = testOutputJSON
-	state.APIBaseURL = srv.URL
-	state.DevServer = srv.URL
-	state.DevMode = false
-	state.Env = ""
-	state.AppVersion = testAppVersion
+	setupCloudState(t, srv.URL)
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"get", "evt-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
 	got := captureStdout(t, func() {
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	if !strings.Contains(got, "evt-1") {
-		t.Errorf("expected output to contain \"evt-1\", got: %s", got)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("failed to parse output: %v\n%s", err, got)
+	}
+	event, _ := result["event"].(map[string]any)
+	if event["internal_id"] != "evt-1" || event["name"] != "test/event" {
+		t.Errorf("unexpected event: %v", event)
+	}
+	runs, _ := result["runs"].([]any)
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %v", result["runs"])
+	}
+	if run := runs[0].(map[string]any); run["id"] != "run-1" || run["functionID"] != testFnID {
+		t.Errorf("unexpected run: %v", run)
 	}
 }
 
-func TestEventsGet_FallbackToREST(t *testing.T) {
-	gqlResponses := map[string]string{
-		"GetEvent": `{"data":null,"errors":[{"message":"not found"}]}`,
-	}
-	restHandlers := map[string]http.HandlerFunc{
-		"/v1/*": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":[{"run_id":"run-1","status":"COMPLETED","function_id":"fn-1"}]}`))
-		},
-	}
-	srv := newMockServer(t, gqlResponses, restHandlers)
-	defer srv.Close()
-
-	t.Setenv("INNGEST_SIGNING_KEY", "")
-	t.Setenv("INNGEST_EVENT_KEY", "")
-
-	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = testOutputJSON
-	state.APIBaseURL = srv.URL
-	state.DevServer = srv.URL
-	state.DevMode = false
-	state.Env = ""
-	state.AppVersion = testAppVersion
-
-	cmd := NewEventsCmd()
-	cmd.SetArgs([]string{"get", "evt-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-
-	got := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+func TestEventsGet_EventNotFound(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events/evt-1": jsonStatus(http.StatusNotFound, `{"error":"Not Found","status":404}`),
 	})
-
-	if !strings.Contains(got, "run-1") {
-		t.Errorf("expected output to contain \"run-1\", got: %s", got)
-	}
-}
-
-func TestEventsGet_BothFail(t *testing.T) {
-	gqlResponses := map[string]string{
-		"GetEvent": `{"data":null,"errors":[{"message":"not found"}]}`,
-	}
-	// No REST handlers — will 404.
-	srv := newMockServer(t, gqlResponses, nil)
 	defer srv.Close()
-
-	t.Setenv("INNGEST_SIGNING_KEY", "")
-	t.Setenv("INNGEST_EVENT_KEY", "")
-
-	state.Config = &config.Config{SigningKey: "signkey-test-123"}
-	state.Output = testOutputJSON
-	state.APIBaseURL = srv.URL
-	state.DevServer = srv.URL
-	state.DevMode = false
-	state.Env = ""
-	state.AppVersion = testAppVersion
+	setupCloudState(t, srv.URL)
 
 	cmd := NewEventsCmd()
 	cmd.SetArgs([]string{"get", "evt-1"})
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when both GraphQL and REST fail")
+	if err == nil || !strings.Contains(err.Error(), "getting event") {
+		t.Fatalf("expected getting event error, got: %v", err)
+	}
+}
+
+func TestEventsGet_RunsError(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events/evt-1":      jsonOK(v1EventJSON),
+		"/v2/events/evt-1/runs": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	cmd := NewEventsCmd()
+	cmd.SetArgs([]string{"get", "evt-1"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	if !inngest.IsAuthError(err) {
+		t.Fatalf("expected auth error from runs lookup, got: %v", err)
 	}
 }
 
 func TestEventsList_Success(t *testing.T) {
-	gqlResponses := map[string]string{
-		"ListEvents": `{"data":{"events":{"data":[{"name":"test/event","recent":[{"id":"evt-1","name":"test/event","event":"{}"}]},{"name":"other/event","recent":[{"id":"evt-2","name":"other/event","event":"{}"}]}],"page":{"page":1,"perPage":20,"totalItems":2,"totalPages":1}}}}`,
-	}
-	srv := newMockServer(t, gqlResponses, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("limit") != "20" {
+				t.Errorf("expected default limit=20, got %q", r.URL.RawQuery)
+			}
+			jsonOK(`{"data":[{"internal_id":"evt-1","name":"test/event","data":{}},{"internal_id":"evt-2","name":"other/event","data":{}}]}`)(w, r)
+		},
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -468,10 +450,9 @@ func TestEventsList_Success(t *testing.T) {
 }
 
 func TestEventsTypes_Success(t *testing.T) {
-	gqlResponses := map[string]string{
-		"ListEvents": `{"data":{"events":{"data":[{"name":"test/event"},{"name":"other/event"}],"page":{"page":1,"perPage":20,"totalItems":2,"totalPages":1}}}}`,
-	}
-	srv := newMockServer(t, gqlResponses, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/insights/events/schemas": jsonOK(`{"data":[{"name":"test/event","schema":{"type":"object"}},{"name":"other/event"}],"page":{"hasMore":false}}`),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -571,9 +552,10 @@ func TestEventsSend_SendError(t *testing.T) {
 }
 
 func TestEventsList_Error(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListEvents": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events":                  jsonStatus(http.StatusUnauthorized, `{"error":"Unauthorized","status":401}`),
+		"/v2/insights/events/schemas": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -603,9 +585,10 @@ func TestEventsList_Error(t *testing.T) {
 }
 
 func TestEventsTypes_ListError(t *testing.T) {
-	srv := newMockServer(t, map[string]string{
-		"ListEvents": `{"data":null,"errors":[{"message":"unauthorized"}]}`,
-	}, nil)
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events":                  jsonStatus(http.StatusUnauthorized, `{"error":"Unauthorized","status":401}`),
+		"/v2/insights/events/schemas": jsonStatus(http.StatusUnauthorized, v2Unauthorized),
+	})
 	defer srv.Close()
 
 	t.Setenv("INNGEST_SIGNING_KEY", "")
@@ -627,9 +610,9 @@ func TestEventsTypes_ListError(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when ListEvents fails")
+		t.Fatal("expected error when the schemas API fails")
 	}
-	if !strings.Contains(err.Error(), "listing events") {
-		t.Errorf("expected error about listing events, got: %v", err)
+	if !strings.Contains(err.Error(), "listing event types") || !inngest.IsAuthError(err) {
+		t.Errorf("expected auth error about listing event types, got: %v", err)
 	}
 }

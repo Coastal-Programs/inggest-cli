@@ -22,13 +22,21 @@ func (c *Client) GetREST(ctx context.Context, path string, result any) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("inngest: read GET response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("inngest: GET %s returned status %d: %s", path, resp.StatusCode, truncateBody(string(respBody)))
+		// v1 errors look like {"error": "Unauthorized", "status": 401}.
+		apiErr := &APIError{StatusCode: resp.StatusCode, Message: truncateBody(string(respBody))}
+		var body struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(respBody, &body) == nil && body.Error != "" {
+			apiErr.Message = body.Error
+		}
+		return apiErr
 	}
 
 	if result != nil {

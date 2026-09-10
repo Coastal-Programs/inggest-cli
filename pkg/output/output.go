@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"text/tabwriter"
 )
@@ -60,7 +61,10 @@ func printText(data any) error {
 			fmt.Println(formatValue(v.Index(i).Interface()))
 		}
 	case reflect.Map:
-		for _, k := range v.MapKeys() {
+		// Deterministic order so text output is diff-able and script-friendly.
+		keys := v.MapKeys()
+		sort.Slice(keys, func(i, j int) bool { return fmt.Sprint(keys[i]) < fmt.Sprint(keys[j]) })
+		for _, k := range keys {
 			fmt.Printf("%s: %v\n", k, v.MapIndex(k))
 		}
 	case reflect.Struct:

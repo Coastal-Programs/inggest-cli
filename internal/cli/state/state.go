@@ -1,7 +1,11 @@
 // Package state holds resolved CLI state shared between root and subcommands.
 package state
 
-import "github.com/Coastal-Programs/inggest-cli/internal/common/config"
+import (
+	"time"
+
+	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+)
 
 var (
 	AppVersion string
@@ -11,4 +15,5 @@ var (
 	DevServer  string
 	DevMode    bool
 	Output     string
+	Timeout    time.Duration // per-request timeout from --timeout
 )

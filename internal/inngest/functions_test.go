@@ -8,391 +8,161 @@ import (
 	"testing"
 )
 
-const (
-	testSendEmailSlug   = "send-email"
-	testExternalIDMyApp = "my-app"
-)
-
-func TestListFunctions(t *testing.T) {
-	response := `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"workflows": [
-							{
-								"id": "fn-1",
-								"name": "Send Email",
-								"slug": "send-email",
-								"isPaused": false,
-								"isArchived": false,
-								"triggers": [{"type": "event", "value": "user/signup"}],
-								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
-							},
-							{
-								"id": "fn-2",
-								"name": "Process Order",
-								"slug": "process-order",
-								"isPaused": false,
-								"isArchived": false,
-								"triggers": [{"type": "cron", "value": "0 * * * *"}],
-								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
-							}
-						]
-					},
-					{
-						"workflows": [
-							{
-								"id": "fn-1",
-								"name": "Send Email",
-								"slug": "send-email",
-								"isPaused": false,
-								"isArchived": false,
-								"triggers": [{"type": "event", "value": "user/signup"}],
-								"app": {"id": "app-1", "name": "My App", "externalID": "my-app"}
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
-			}
-		}
-	}`
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	fns, err := client.ListFunctions(context.Background())
-	if err != nil {
-		t.Fatalf("ListFunctions returned error: %v", err)
-	}
-
-	// Verify the request contained the expected query.
-	if !strings.Contains(captured.Query, "events") {
-		t.Errorf("expected query to contain 'events', got: %s", captured.Query)
-	}
-	if !strings.Contains(captured.Query, "workflows") {
-		t.Errorf("expected query to contain 'workflows', got: %s", captured.Query)
-	}
-
-	// Verify deduplication: fn-1 appears in two event types but should be returned once.
-	if len(fns) != 2 {
-		t.Fatalf("expected 2 functions (deduplicated), got %d", len(fns))
-	}
-
-	// First function.
-	if fns[0].ID != testFnID1 {
-		t.Errorf("expected first function ID 'fn-1', got %q", fns[0].ID)
-	}
-	if fns[0].Name != testSendEmail {
-		t.Errorf("expected first function Name 'Send Email', got %q", fns[0].Name)
-	}
-	if fns[0].Slug != "send-email" {
-		t.Errorf("expected first function Slug 'send-email', got %q", fns[0].Slug)
-	}
-	if fns[0].App == nil || fns[0].App.ID != testAppID1 {
-		t.Errorf("expected first function App.ID 'app-1', got %v", fns[0].App)
-	}
-	if len(fns[0].Triggers) != 1 {
-		t.Fatalf("expected 1 trigger on first function, got %d", len(fns[0].Triggers))
-	}
-	if fns[0].Triggers[0].Type != "event" {
-		t.Errorf("expected trigger type 'event', got %q", fns[0].Triggers[0].Type)
-	}
-	if fns[0].Triggers[0].Value != testTriggerUserSignup {
-		t.Errorf("expected trigger value 'user/signup', got %q", fns[0].Triggers[0].Value)
-	}
-
-	// Second function.
-	if fns[1].ID != "fn-2" {
-		t.Errorf("expected second function ID 'fn-2', got %q", fns[1].ID)
-	}
-	if fns[1].Name != "Process Order" {
-		t.Errorf("expected second function Name 'Process Order', got %q", fns[1].Name)
-	}
-	if fns[1].Slug != "process-order" {
-		t.Errorf("expected second function Slug 'process-order', got %q", fns[1].Slug)
-	}
-	if len(fns[1].Triggers) != 1 {
-		t.Fatalf("expected 1 trigger on second function, got %d", len(fns[1].Triggers))
-	}
-	if fns[1].Triggers[0].Type != "cron" {
-		t.Errorf("expected trigger type 'cron', got %q", fns[1].Triggers[0].Type)
-	}
-	if fns[1].Triggers[0].Value != "0 * * * *" {
-		t.Errorf("expected trigger value '0 * * * *', got %q", fns[1].Triggers[0].Value)
+// cloudFunctionsRoutes stubs apps + per-app functions for cloud ListFunctions.
+func cloudFunctionsRoutes() map[string]v2Route {
+	return map[string]v2Route{
+		"GET " + testPathV2Apps:                                  twoPageApps,
+		"GET /v2/apps/" + testAppID1 + "/functions":              staticRoute(`{"data": [` + testV2Fn1 + `], "page": {"hasMore": false}}`),
+		"GET /v2/apps/" + testAppID2 + "/functions":              staticRoute(`{"data": [` + testV2Fn2 + `], "page": {"hasMore": false}}`),
+		"GET /v2/apps/" + testAppID1 + "/functions/" + testFnID1: staticRoute(`{"data": ` + testV2Fn1 + `}`),
 	}
 }
 
-func TestListFunctions_Empty(t *testing.T) {
-	response := `{"data": {"events": {"data": [], "page": {"page": 1, "totalPages": 0}}}}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	fns, err := client.ListFunctions(context.Background())
+func TestListFunctions_CloudAttachesApp(t *testing.T) {
+	srv, _ := newV2Server(t, cloudFunctionsRoutes())
+	fns, err := newCloudClient(srv).ListFunctions(context.Background())
 	if err != nil {
-		t.Fatalf("ListFunctions returned error: %v", err)
+		t.Fatalf("ListFunctions: %v", err)
 	}
-	if fns == nil {
-		t.Fatal("expected non-nil empty slice, got nil")
+	if len(fns) != 2 {
+		t.Fatalf("got %d functions, want 2", len(fns))
 	}
-	if len(fns) != 0 {
-		t.Errorf("expected 0 functions, got %d", len(fns))
+	fn := fns[0]
+	if fn.Slug != testSlugSend || fn.App == nil || fn.App.Name != testMyApp {
+		t.Errorf("fn = %+v app = %+v, want full app attached", fn, fn.App)
+	}
+	if len(fn.Triggers) != 1 || fn.Triggers[0].Condition != "event.data.ok" {
+		t.Errorf("triggers = %+v, want condition decoded from \"if\"", fn.Triggers)
+	}
+	if fn.Configuration == nil || fn.Configuration.Retries.Value != 4 || fn.Configuration.Concurrency[0].Limit.Value != 10 {
+		t.Errorf("configuration = %+v", fn.Configuration)
+	}
+	if fns[1].App.Name != "Other App" {
+		t.Errorf("second fn app = %+v", fns[1].App)
+	}
+}
+
+func TestListAppFunctions_Paginates(t *testing.T) {
+	srv, counter := newV2Server(t, map[string]v2Route{
+		"GET /v2/apps/" + testAppID1 + "/functions": func(t *testing.T, r *http.Request) string {
+			if r.URL.Query().Get("cursor") == testCursor2 {
+				return `{"data": [` + testV2Fn2 + `], "page": {"hasMore": false}}`
+			}
+			return `{"data": [` + testV2Fn1 + `], "page": {"cursor": "` + testCursor2 + `", "hasMore": true}}`
+		},
+	})
+	fns, err := newCloudClient(srv).ListAppFunctions(context.Background(), testAppID1)
+	if err != nil || len(fns) != 2 || counter.count() != 2 {
+		t.Fatalf("ListAppFunctions = (%d fns, %v) over %d requests", len(fns), err, counter.count())
 	}
 }
 
 func TestGetFunction(t *testing.T) {
-	response := `{
-		"data": {
-			"events": {
-				"data": [
-					{
-						"workflows": [
-							{
-								"id": "fn-1",
-								"name": "Send Email",
-								"slug": "send-email",
-								"url": "https://example.com/api/inngest",
-								"isPaused": false,
-								"isArchived": false,
-								"triggers": [
-									{"type": "event", "value": "user/signup", "condition": "event.data.active == true"}
-								],
-								"configuration": {
-									"retries": {"value": 3, "isDefault": false}
-								},
-								"app": {
-									"id": "app-1",
-									"name": "My App",
-									"externalID": "my-app",
-									"appVersion": "1.0.0"
-								}
-							}
-						]
-					}
-				],
-				"page": {"page": 1, "totalPages": 1}
+	srv, _ := newV2Server(t, cloudFunctionsRoutes())
+	client := newCloudClient(srv)
+
+	bySlug, err := client.GetFunction(context.Background(), testSlugSend)
+	if err != nil || bySlug.ID != testFnID1 {
+		t.Errorf("by slug = (%+v, %v)", bySlug, err)
+	}
+	byID, err := client.GetFunction(context.Background(), testFnID2)
+	if err != nil || byID.Slug != "other-fn" {
+		t.Errorf("by id = (%+v, %v)", byID, err)
+	}
+	if _, err := client.GetFunction(context.Background(), "nope"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unknown function error = %v", err)
+	}
+}
+
+func TestListFunctions_CloudError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusForbidden, testUnauthorized)
+	}))
+	defer srv.Close()
+	if _, err := newCloudClient(srv).ListFunctions(context.Background()); !IsAuthError(err) {
+		t.Fatalf("want auth error, got %v", err)
+	}
+}
+
+func TestListFunctions_Dev(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{"DevFunctions": `{"data":{"functions":[` + testV2Fn1 + `]}}`})
+	fns, err := newDevClient(srv).ListFunctions(context.Background())
+	if err != nil || len(fns) != 1 || fns[0].Triggers[0].Condition != "event.data.ok" {
+		t.Fatalf("ListFunctions(dev) = (%+v, %v)", fns, err)
+	}
+	nilSrv, _ := newDevGQLServer(t, map[string]string{"DevFunctions": `{"data":{"functions":null}}`})
+	fns, err = newDevClient(nilSrv).ListFunctions(context.Background())
+	if err != nil || fns == nil || len(fns) != 0 {
+		t.Errorf("null functions = (%v, %v), want empty slice", fns, err)
+	}
+}
+
+func TestInvokeFunction_Cloud(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"POST /v2/apps/" + testAppID1 + "/functions/" + testFnID1 + "/invoke": func(t *testing.T, r *http.Request) string {
+			body := decodeJSONBody(t, r)
+			data, _ := body["data"].(map[string]any)
+			if data["hello"] != "world" {
+				t.Errorf("data = %v", body["data"])
 			}
-		}
-	}`
-
-	var captured graphqlRequest
-	srv := newTestServer(t, response, &captured)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+			if body["idempotencyKey"] != "k1" {
+				t.Errorf("idempotencyKey = %v", body["idempotencyKey"])
+			}
+			return `{"data": {"runId": "` + testRunID1 + `", "queuedAt": "` + testTimeQueued + `"}}`
+		},
 	})
-
-	fn, err := client.GetFunction(context.Background(), "send-email")
-	if err != nil {
-		t.Fatalf("GetFunction returned error: %v", err)
-	}
-
-	// Verify the request uses the events/workflows pattern.
-	if !strings.Contains(captured.Query, "events") {
-		t.Errorf("expected query to contain 'events', got: %s", captured.Query)
-	}
-
-	// Verify all fields on the returned function.
-	if fn == nil {
-		t.Fatal("expected non-nil function")
-	}
-	if fn.ID != testFnID1 {
-		t.Errorf("expected ID 'fn-1', got %q", fn.ID)
-	}
-	if fn.Name != testSendEmail {
-		t.Errorf("expected Name 'Send Email', got %q", fn.Name)
-	}
-	if fn.Slug != testSendEmailSlug {
-		t.Errorf("expected Slug 'send-email', got %q", fn.Slug)
-	}
-	if fn.URL != testAppURL {
-		t.Errorf("expected URL 'https://example.com/api/inngest', got %q", fn.URL)
-	}
-	if fn.IsPaused {
-		t.Errorf("expected IsPaused false, got true")
-	}
-	if fn.IsArchived {
-		t.Errorf("expected IsArchived false, got true")
-	}
-
-	// Triggers.
-	if len(fn.Triggers) != 1 {
-		t.Fatalf("expected 1 trigger, got %d", len(fn.Triggers))
-	}
-	trigger := fn.Triggers[0]
-	if trigger.Type != "event" {
-		t.Errorf("expected trigger Type 'event', got %q", trigger.Type)
-	}
-	if trigger.Value != testTriggerUserSignup {
-		t.Errorf("expected trigger Value 'user/signup', got %q", trigger.Value)
-	}
-	if trigger.Condition != "event.data.active == true" {
-		t.Errorf("expected trigger Condition 'event.data.active == true', got %q", trigger.Condition)
-	}
-
-	// Configuration.
-	if fn.Configuration == nil {
-		t.Fatal("expected non-nil Configuration")
-	}
-	if fn.Configuration.Retries == nil {
-		t.Fatal("expected non-nil Retries in Configuration")
-	}
-	if fn.Configuration.Retries.Value != 3 {
-		t.Errorf("expected Retries.Value 3, got %d", fn.Configuration.Retries.Value)
-	}
-	if fn.Configuration.Retries.IsDefault != false {
-		t.Errorf("expected Retries.IsDefault false, got %v", fn.Configuration.Retries.IsDefault)
-	}
-
-	// App.
-	if fn.App == nil {
-		t.Fatal("expected non-nil App")
-	}
-	if fn.App.ID != testAppID1 {
-		t.Errorf("expected App.ID 'app-1', got %q", fn.App.ID)
-	}
-	if fn.App.Name != testMyApp {
-		t.Errorf("expected App.Name 'My App', got %q", fn.App.Name)
-	}
-	if fn.App.ExternalID != testExternalIDMyApp {
-		t.Errorf("expected App.ExternalID %q, got %q", testExternalIDMyApp, fn.App.ExternalID)
-	}
-	if fn.App.AppVersion != "1.0.0" {
-		t.Errorf("expected App.AppVersion '1.0.0', got %q", fn.App.AppVersion)
+	res, err := newCloudClient(srv).InvokeFunction(context.Background(), testAppID1, testFnID1, map[string]any{"hello": "world"}, "k1")
+	if err != nil || res.RunID != testRunID1 || res.QueuedAt == nil {
+		t.Fatalf("InvokeFunction = (%+v, %v)", res, err)
 	}
 }
 
-func TestGetFunction_NotFound(t *testing.T) {
-	response := `{"data": {"events": {"data": [], "page": {"page": 1, "totalPages": 0}}}}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+func TestInvokeFunction_CloudDefaults(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"POST /v2/apps/" + testAppID1 + "/functions/" + testFnID1 + "/invoke": func(t *testing.T, r *http.Request) string {
+			body := decodeJSONBody(t, r)
+			if data, ok := body["data"].(map[string]any); !ok || len(data) != 0 {
+				t.Errorf("nil data should be sent as {}, got %v", body["data"])
+			}
+			if _, ok := body["idempotencyKey"]; ok {
+				t.Error("idempotencyKey should be omitted when empty")
+			}
+			return `{"data": {"runId": "` + testRunID1 + `"}}`
+		},
 	})
-
-	fn, err := client.GetFunction(context.Background(), "nonexistent-fn")
-	if err == nil {
-		t.Fatal("expected error for not-found function, got nil")
-	}
-	if fn != nil {
-		t.Errorf("expected nil function, got %+v", fn)
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected error to contain 'not found', got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "nonexistent-fn") {
-		t.Errorf("expected error to contain slug 'nonexistent-fn', got: %v", err)
+	if _, err := newCloudClient(srv).InvokeFunction(context.Background(), testAppID1, testFnID1, nil, ""); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestListFunctions_GraphQLError(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "unauthorized"}]}`
-
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+func TestInvokeFunction_Dev(t *testing.T) {
+	srv, rec := newDevGQLServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+		"DevRuns":      `{"data":{"runs":{"edges":[{"node":{"id":"` + testRunID1 + `","status":"QUEUED"}}],"pageInfo":{}}}}`,
 	})
-
-	fns, err := client.ListFunctions(context.Background())
-	if err == nil {
-		t.Fatal("expected error for GraphQL error response, got nil")
+	res, err := newDevClient(srv).InvokeFunction(context.Background(), "", testSlugSend, map[string]any{"a": 1}, "")
+	if err != nil || res.RunID != testRunID1 {
+		t.Fatalf("InvokeFunction(dev) = (%+v, %v)", res, err)
 	}
-	if fns != nil {
-		t.Errorf("expected nil functions, got %+v", fns)
-	}
-	if !strings.Contains(err.Error(), "unauthorized") {
-		t.Errorf("expected error to contain 'unauthorized', got: %v", err)
+	// The final call is the DevRuns poll scoped to the resolved function UUID.
+	filter := rec.last(t).Variables["filter"].(map[string]any)
+	if ids := filter["functionIDs"].([]any); len(ids) != 1 || ids[0] != testFnID1 {
+		t.Errorf("poll functionIDs = %v", ids)
 	}
 }
 
-func TestGetFunction_GraphQLError(t *testing.T) {
-	response := `{"data": null, "errors": [{"message": "internal server error"}]}`
+func TestInvokeFunction_DevErrors(t *testing.T) {
+	unknown, _ := newDevGQLServer(t, map[string]string{"DevFunctions": `{"data":{"functions":[]}}`})
+	if _, err := newDevClient(unknown).InvokeFunction(context.Background(), "", "nope", nil, ""); err == nil || !strings.Contains(err.Error(), "not found on dev server") {
+		t.Errorf("unknown slug error = %v", err)
+	}
 
-	srv := newTestServer(t, response, nil)
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
+	rejected, _ := newDevGQLServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":false}}`,
 	})
-
-	fn, err := client.GetFunction(context.Background(), "send-email")
-	if err == nil {
-		t.Fatal("expected error for GraphQL error response, got nil")
-	}
-	if fn != nil {
-		t.Errorf("expected nil function, got %+v", fn)
-	}
-	if !strings.Contains(err.Error(), "internal server error") {
-		t.Errorf("expected error to contain 'internal server error', got: %v", err)
-	}
-}
-
-func TestListFunctions_HTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("server error"))
-	}))
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	fns, err := client.ListFunctions(context.Background())
-	if err == nil {
-		t.Fatal("expected error for HTTP 500, got nil")
-	}
-	if fns != nil {
-		t.Errorf("expected nil functions, got %+v", fns)
-	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Errorf("expected error to contain '500', got: %v", err)
-	}
-}
-
-func TestGetFunction_HTTPError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte("bad gateway"))
-	}))
-	defer srv.Close()
-
-	client := NewClient(ClientOptions{
-		SigningKey: "test-key",
-		APIBaseURL: srv.URL,
-	})
-
-	fn, err := client.GetFunction(context.Background(), "send-email")
-	if err == nil {
-		t.Fatal("expected error for HTTP 502, got nil")
-	}
-	if fn != nil {
-		t.Errorf("expected nil function, got %+v", fn)
-	}
-	if !strings.Contains(err.Error(), "502") {
-		t.Errorf("expected error to contain '502', got: %v", err)
+	if _, err := newDevClient(rejected).InvokeFunction(context.Background(), "", testSlugSend, nil, ""); err == nil || !strings.Contains(err.Error(), "did not accept") {
+		t.Errorf("rejected invoke error = %v", err)
 	}
 }
