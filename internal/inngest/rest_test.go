@@ -85,3 +85,13 @@ func TestGetREST_NewRequestError(t *testing.T) {
 		t.Errorf("expected 'create GET request' error, got: %v", err)
 	}
 }
+
+// TestGetREST_TransportError covers the branch where the v1 REST endpoint is
+// unreachable.
+func TestGetREST_TransportError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	var out map[string]any
+	err := newCloudClient(srv).GetREST(context.Background(), "/v1/events", &out)
+	requireErrContains(t, err, "GET /v1/events")
+}

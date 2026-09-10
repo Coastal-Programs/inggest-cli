@@ -1174,3 +1174,65 @@ func TestMetrics_TruncatesAtMaxPages(t *testing.T) {
 		t.Errorf("expected truncated=true truncatedAt=%d, got %v", maxPages, result)
 	}
 }
+
+// TestBacklog_PaginationTruncation covers the truncation branches of the
+// backlog command. The server always reports another page, so paginateRuns
+// stops at its maxPages cap and flags the result as truncated.
+func TestBacklog_PaginationTruncation(t *testing.T) {
+	alwaysMore := jsonOK(`{"data":[{"id":"r1","status":"RUNNING","function":{"id":"fn-a","name":"Func A","slug":"fn-a"},"trigger":{"eventName":"evt"}}],"page":{"hasMore":true,"cursor":"next"}}`)
+
+	t.Run("text output warns", func(t *testing.T) {
+		srv := newMockServer(t, nil, map[string]http.HandlerFunc{"/v2/runs": alwaysMore})
+		defer srv.Close()
+		setupCloudState(t, srv.URL)
+		state.Output = testOutputText
+
+		var buf bytes.Buffer
+		cmd := NewBacklogCmd()
+		cmd.SetArgs([]string{})
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+
+		got := captureStdout(t, func() {
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("backlog returned error: %v", err)
+			}
+		})
+
+		if !strings.Contains(got, "results truncated at") {
+			t.Errorf("expected a truncation note in text output, got:\n%s", got)
+		}
+		if !strings.Contains(buf.String(), "pagination limit reached") {
+			t.Errorf("expected a pagination warning on stderr, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("json output carries the flags", func(t *testing.T) {
+		srv := newMockServer(t, nil, map[string]http.HandlerFunc{"/v2/runs": alwaysMore})
+		defer srv.Close()
+		setupCloudState(t, srv.URL)
+		state.Output = testOutputJSON
+
+		cmd := NewBacklogCmd()
+		cmd.SetArgs([]string{})
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		got := captureStdout(t, func() {
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("backlog returned error: %v", err)
+			}
+		})
+
+		var result map[string]any
+		if err := json.Unmarshal([]byte(got), &result); err != nil {
+			t.Fatalf("output is not valid JSON: %v\n%s", err, got)
+		}
+		if result["truncated"] != true {
+			t.Errorf("truncated = %v, want true", result["truncated"])
+		}
+		if _, ok := result["truncatedAt"]; !ok {
+			t.Error("expected a truncatedAt field in JSON output")
+		}
+	})
+}

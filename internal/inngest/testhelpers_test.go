@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Shared test constants used across multiple test files in this package.
@@ -44,10 +46,19 @@ const (
 	testPathV2Events = "/v2/events"
 	testPathDevGQL   = "/v0/gql"
 
-	testEmptyListResp  = `{"data": [], "page": {"hasMore": false}}`
-	testUnauthorized   = `{"errors": [{"code": "invalid_signing_key", "message": "invalid signing key"}]}`
-	testNotFoundResp   = `{"errors": [{"code": "not_found", "message": "resource not found"}]}`
-	testCancelledRunID = "cancelled-run"
+	testEmptyListResp   = `{"data": [], "page": {"hasMore": false}}`
+	testUnauthorized    = `{"errors": [{"code": "invalid_signing_key", "message": "invalid signing key"}]}`
+	testNotFoundResp    = `{"errors": [{"code": "not_found", "message": "resource not found"}]}`
+	testServerErrorResp = `{"errors": [{"code": "internal_error", "message": "something went wrong"}]}`
+	testCancelledRunID  = "cancelled-run"
+
+	// testInvalidURL contains a NUL byte, so net/url rejects it before any
+	// connection is attempted — it exercises request-construction failures.
+	testInvalidURL = "http://invalid\x00host"
+
+	// testMsgInvalidKey is the message carried by testUnauthorized; asserting on
+	// it proves the server's error text survives the wrapping chain.
+	testMsgInvalidKey = "invalid signing key"
 )
 
 // errBodyReader is an io.ReadCloser whose Read always returns an error.
@@ -78,6 +89,50 @@ func (t *errBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 // a raw API key so handlers can assert "Bearer test-api-key".
 func newCloudClient(srv *httptest.Server) *Client {
 	return NewClient(ClientOptions{APIBaseURL: srv.URL, SigningKey: testAPIKey})
+}
+
+// requireErrContains fails the test unless err is non-nil and its message
+// contains want.
+func requireErrContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected an error containing %q, got nil", want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+// newErrorServer returns a server that answers every request with the given
+// status and body.
+func newErrorServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, status, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// newClosedServer returns an already-closed server. Requests against it fail in
+// the transport, exercising the "connection refused" branches.
+func newClosedServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close()
+	return srv
+}
+
+// newUnusedServer returns a server that fails the test if it is ever called —
+// used to prove a call fails before it reaches the network.
+func newUnusedServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		writeJSON(w, http.StatusOK, "{}")
+	}))
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // newDevClient returns a dev-mode client pointed at srv.
@@ -160,6 +215,34 @@ func (r *gqlRecorder) add(req graphqlRequest) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, req)
+}
+
+// countOp returns how many recorded requests used the given operation name.
+func (r *gqlRecorder) countOp(op string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, call := range r.calls {
+		if call.OperationName == op {
+			n++
+		}
+	}
+	return n
+}
+
+// waitFor blocks until cond returns true, failing the test if it never does.
+// It polls rather than sleeping a fixed duration so tests stay fast and are
+// not tied to a wall-clock guess.
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
 }
 
 // last returns the most recent request, failing the test if none were made.
@@ -250,4 +333,10 @@ func (c *requestCounter) count() int {
 // staticRoute returns a v2Route that always responds with body.
 func staticRoute(body string) v2Route {
 	return func(*testing.T, *http.Request) string { return body }
+}
+
+// alwaysMoreRoute serves item forever, always claiming another page follows, so
+// only the maxListPages guard can end the caller's pagination loop.
+func alwaysMoreRoute(item string) v2Route {
+	return staticRoute(`{"data": [` + item + `], "page": {"cursor": "` + testCursor2 + `", "hasMore": true}}`)
 }

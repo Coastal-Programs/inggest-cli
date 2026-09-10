@@ -105,3 +105,34 @@ func TestAppsErrors(t *testing.T) {
 		t.Errorf("get err = %v", err)
 	}
 }
+
+// TestAppsBareCommandShowsHelp covers the parent command's RunE, which prints
+// help when invoked with no subcommand.
+func TestAppsBareCommandShowsHelp(t *testing.T) {
+	cmd := NewAppsCmd()
+	cmd.SetArgs([]string{})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("apps with no subcommand returned error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "sync") {
+		t.Errorf("expected help listing subcommands, got:\n%s", buf.String())
+	}
+}
+
+// TestAppsSync_Error covers the failed-sync branch.
+func TestAppsSync_Error(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/apps/app-1/syncs": jsonStatus(http.StatusInternalServerError, v2ServerError),
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	_, err := runApps(t, "sync", "app-1", "--url", "https://x/api/inngest")
+	if err == nil || !strings.Contains(err.Error(), "syncing app") {
+		t.Errorf("err = %v, want a syncing app error", err)
+	}
+}

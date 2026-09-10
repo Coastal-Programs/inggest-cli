@@ -71,3 +71,48 @@ func TestRawRequest_DevModeUsesDevServer(t *testing.T) {
 		t.Fatalf("RawRequest(dev) = (%+v, %v)", resp, err)
 	}
 }
+
+// TestRawRequest_RejectsMalformedPaths covers the url.ParseRequestURI guard:
+// a path that is relative but still unparseable is refused before any request
+// is made, so the credential never leaves the process.
+func TestRawRequest_RejectsMalformedPaths(t *testing.T) {
+	srv := newUnusedServer(t)
+	client := newCloudClient(srv)
+
+	for _, path := range []string{"/v2/runs%zz", "/v2/runs\x7f"} {
+		_, err := client.RawRequest(context.Background(), http.MethodGet, path, nil)
+		requireErrContains(t, err, "invalid path")
+	}
+}
+
+// TestRawRequest_TransportError covers the branch where the request is well
+// formed but the API is unreachable.
+func TestRawRequest_TransportError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	_, err := newCloudClient(srv).RawRequest(context.Background(), http.MethodGet, "/v2/runs", nil)
+	requireErrContains(t, err, "GET /v2/runs")
+}
+
+// TestRawRequest_ReadBodyError covers the branch where response headers arrive
+// but the body cannot be fully read.
+func TestRawRequest_ReadBodyError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer srv.Close()
+
+	_, err := newCloudClient(srv).RawRequest(context.Background(), http.MethodGet, "/v2/runs", nil)
+	requireErrContains(t, err, "read GET /v2/runs response")
+}
+
+// TestRawRequest_MethodConstructionError covers the branch where the method
+// itself is not a valid HTTP token, so the request cannot be constructed.
+func TestRawRequest_MethodConstructionError(t *testing.T) {
+	srv := newUnusedServer(t)
+
+	_, err := newCloudClient(srv).RawRequest(context.Background(), "BAD METHOD", "/v2/runs", nil)
+	requireErrContains(t, err, "create BAD METHOD /v2/runs request")
+}

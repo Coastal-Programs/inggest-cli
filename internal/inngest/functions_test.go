@@ -166,3 +166,71 @@ func TestInvokeFunction_DevErrors(t *testing.T) {
 		t.Errorf("rejected invoke error = %v", err)
 	}
 }
+
+// TestListAppFunctions_MaxPagesGuard proves the per-app cursor loop is bounded.
+func TestListAppFunctions_MaxPagesGuard(t *testing.T) {
+	srv, counter := newV2Server(t, map[string]v2Route{
+		"GET /v2/apps/" + testAppID1 + "/functions": alwaysMoreRoute(testV2Fn1),
+	})
+
+	fns, err := newCloudClient(srv).ListAppFunctions(context.Background(), testAppID1)
+	if err != nil {
+		t.Fatalf("ListAppFunctions returned error: %v", err)
+	}
+
+	if got := counter.count(); got != maxListPages {
+		t.Errorf("request count = %d, want the maxListPages cap of %d", got, maxListPages)
+	}
+	if len(fns) != maxListPages {
+		t.Errorf("collected %d functions, want %d (one per page)", len(fns), maxListPages)
+	}
+}
+
+// TestListAppFunctions_Error covers the per-app request failure branch, which
+// must name the app whose listing failed.
+func TestListAppFunctions_Error(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).ListAppFunctions(context.Background(), testAppID1)
+	requireErrContains(t, err, "list functions for app "+testAppID1)
+}
+
+// TestListFunctions_AppListingError covers the branch where the initial app
+// listing fails, so no per-app request is ever made.
+func TestListFunctions_AppListingError(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).ListFunctions(context.Background())
+	requireErrContains(t, err, "list apps")
+}
+
+// TestGetFunction_ListError covers GetFunction's propagation of a failed
+// underlying listing.
+func TestGetFunction_ListError(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).GetFunction(context.Background(), "my-func")
+	requireErrContains(t, err, "list apps")
+}
+
+// TestInvokeFunction_Error covers the failed-invoke branch.
+func TestInvokeFunction_Error(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).InvokeFunction(context.Background(), testAppID1, testFnID1, nil, "")
+	requireErrContains(t, err, "invoke function "+testFnID1)
+}
+
+// TestListFunctions_PerAppError covers the branch where the app listing
+// succeeds but a per-app function listing fails, so the whole call fails
+// rather than silently returning the functions of the apps that did work.
+func TestListFunctions_PerAppError(t *testing.T) {
+	srv, _ := newV2Server(t, map[string]v2Route{
+		"GET " + testPathV2Apps: staticRoute(`{"data": [` + testV2App1 + `], "page": {"hasMore": false}}`),
+		// Malformed JSON: the per-app request is answered, but decoding fails.
+		"GET /v2/apps/" + testAppID1 + "/functions": staticRoute(`{"data": [`),
+	})
+
+	_, err := newCloudClient(srv).ListFunctions(context.Background())
+	requireErrContains(t, err, "list functions for app "+testAppID1)
+}

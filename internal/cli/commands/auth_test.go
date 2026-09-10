@@ -1018,3 +1018,41 @@ func TestValidateSigningKey_CloudFormatErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestAuthLoginWithAPIKey covers the --api-key branch, which stores the API
+// key rather than the signing key.
+func TestAuthLoginWithAPIKey(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "cli.json")
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+	t.Setenv("INNGEST_API_KEY", "")
+	t.Setenv("INNGEST_SIGNING_KEY", "")
+	// The resolved config path is cached in a package-level sync.Once, so it
+	// must be reset or an earlier test's path is reused and the save lands
+	// outside this test's temp dir.
+	config.ResetForTest()
+
+	state.Config = &config.Config{}
+	state.Output = testOutputJSON
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login", "--api-key", "ak-test-abc123"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("auth login --api-key returned error: %v", err)
+	}
+
+	if state.Config.APIKey != "ak-test-abc123" {
+		t.Errorf("APIKey = %q, want %q", state.Config.APIKey, "ak-test-abc123")
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("reading saved config: %v", err)
+	}
+	if !strings.Contains(string(data), "ak-test-abc123") {
+		t.Errorf("saved config does not contain the API key, got: %s", data)
+	}
+}

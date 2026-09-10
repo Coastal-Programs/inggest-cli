@@ -198,3 +198,102 @@ func TestNewRootCmd_PersistentPreRunE(t *testing.T) {
 		t.Errorf("expected DevServer %q, got %q", "http://localhost:9999", state.DevServer)
 	}
 }
+
+// TestNewRootCmd_FlagsOverrideConfig covers the flag-precedence branches in
+// PersistentPreRunE: --env, --api-url and --dev-url must each beat the value
+// resolved from the config file.
+func TestNewRootCmd_FlagsOverrideConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "cli.json")
+	cfg := config.Config{
+		ActiveEnv:    "staging",
+		APIBaseURL:   "https://config-api.example.com",
+		DevServerURL: "http://localhost:9999",
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	state.Env = ""
+	state.APIBaseURL = ""
+	state.DevServer = ""
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"--env", "flag-env",
+		"--api-url", "https://flag-api.example.com",
+		"--dev-url", "http://localhost:1234",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if state.Env != "flag-env" {
+		t.Errorf("--env should win over config: got %q, want %q", state.Env, "flag-env")
+	}
+	if state.APIBaseURL != "https://flag-api.example.com" {
+		t.Errorf("--api-url should win over config: got %q", state.APIBaseURL)
+	}
+	if state.DevServer != "http://localhost:1234" {
+		t.Errorf("--dev-url should win over config: got %q", state.DevServer)
+	}
+}
+
+// TestNewRootCmd_PersistentPreRunE_ConfigLoadError covers the branch where
+// config.Load() fails: a malformed config file must abort the command rather
+// than run it against half-resolved state.
+func TestNewRootCmd_PersistentPreRunE_ConfigLoadError(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "cli.json")
+	if err := os.WriteFile(cfgPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"version"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error when the config file is malformed")
+	}
+}
+
+// TestExecute_ErrorPathReturnsExitCode covers the failure tail of Execute:
+// the error is reported and mapped to a non-zero exit code.
+func TestExecute_ErrorPathReturnsExitCode(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "cli.json")
+	if err := os.WriteFile(cfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config.ResetForTest()
+	t.Setenv("INNGEST_CLI_CONFIG", cfgPath)
+
+	// Execute reads the command line from os.Args.
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+	os.Args = []string{"inngest", "no-such-command"}
+
+	// Silence the error report so the suite output stays clean.
+	origStderr := os.Stderr
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = devNull
+	t.Cleanup(func() {
+		os.Stderr = origStderr
+		_ = devNull.Close()
+	})
+
+	code := Execute("v0.0.0-test")
+	if code == ExitOK {
+		t.Fatal("expected a non-zero exit code for an unknown command")
+	}
+}

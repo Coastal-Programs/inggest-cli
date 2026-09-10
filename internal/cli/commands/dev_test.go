@@ -11,6 +11,7 @@ import (
 
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
+	"github.com/Coastal-Programs/inggest-cli/pkg/output"
 )
 
 const (
@@ -880,4 +881,93 @@ func TestDevEvents_GraphQLError(t *testing.T) {
 	if !strings.Contains(err.Error(), "querying events") {
 		t.Errorf("expected error about querying events, got: %v", err)
 	}
+}
+
+// setupDevTableState points the dev commands at srv with table output.
+func setupDevTableState(t *testing.T, srvURL string) {
+	t.Helper()
+	state.Config = &config.Config{}
+	state.DevServer = srvURL
+	state.AppVersion = testAppVersion
+	state.Output = string(output.FormatTable)
+	t.Cleanup(func() { state.Output = testOutputJSON })
+}
+
+// TestDevCommands_TableOutput covers the table-rendering branch of the dev
+// functions, runs and events commands.
+func TestDevCommands_TableOutput(t *testing.T) {
+	srv := newMockServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"fn-1","name":"My Function","slug":"my-func","triggers":[{"type":"EVENT","value":"test/event"}],"app":{"id":"app-1","name":"test-app"}}]}}`,
+		"DevRuns":      `{"data":{"runs":{"edges":[{"node":{"id":"run-1","status":"COMPLETED","function":{"id":"fn-1","name":"My Function","slug":"my-func"}}}],"pageInfo":{"hasNextPage":false}}}}`,
+	}, map[string]http.HandlerFunc{
+		"/v1/events": jsonOK(`{"data":[{"internal_id":"evt-1","name":"test/event","received_at":"2024-01-01T00:00:00Z"}]}`),
+	})
+	defer srv.Close()
+
+	for _, tt := range []struct{ name, sub, want string }{
+		{"functions", "functions", "my-func"},
+		{"runs", "runs", "run-1"},
+		{"events", "events", "evt-1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setupDevTableState(t, srv.URL)
+
+			cmd := NewDevCmd()
+			cmd.SetArgs([]string{tt.sub})
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			got := captureStdout(t, func() {
+				if err := cmd.Execute(); err != nil {
+					t.Fatalf("dev %s returned error: %v", tt.sub, err)
+				}
+			})
+
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("expected %q in table output, got:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
+// TestDevEvents_SinceBranches covers the --since parsing branches of the dev
+// events command.
+func TestDevEvents_SinceBranches(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": jsonOK(`{"data":[{"internal_id":"evt-1","name":"test/event","received_at":"2024-01-01T00:00:00Z"}]}`),
+	})
+	defer srv.Close()
+
+	t.Run("valid since", func(t *testing.T) {
+		setupDevTableState(t, srv.URL)
+		state.Output = testOutputJSON
+
+		cmd := NewDevCmd()
+		cmd.SetArgs([]string{"events", "--since", "1h"})
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		got := captureStdout(t, func() {
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("dev events --since returned error: %v", err)
+			}
+		})
+		if !strings.Contains(got, "evt-1") {
+			t.Errorf("expected the event in output, got:\n%s", got)
+		}
+	})
+
+	t.Run("invalid since", func(t *testing.T) {
+		setupDevTableState(t, srv.URL)
+		state.Output = testOutputJSON
+
+		cmd := NewDevCmd()
+		cmd.SetArgs([]string{"events", "--since", "not-a-duration"})
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		if err := cmd.Execute(); err == nil {
+			t.Error("expected an error for an invalid --since value")
+		}
+	})
 }

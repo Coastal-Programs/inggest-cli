@@ -395,3 +395,39 @@ func TestCancelAndRerun_Dev(t *testing.T) {
 		t.Errorf("RerunRun = (%q, %v)", newID, err)
 	}
 }
+
+// TestCloudRunOperations_Errors covers the failure branch of each cloud run
+// operation: every wrapper must name the run it was acting on.
+func TestCloudRunOperations_Errors(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+	client := newCloudClient(srv)
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{
+			name: "get run trace",
+			call: func() error { _, err := client.GetRunTrace(ctx, testRunID1); return err },
+			want: "get run trace " + testRunID1,
+		},
+		{
+			name: "cancel run",
+			call: func() error { _, err := client.CancelRun(ctx, testRunID1); return err },
+			want: "cancel run " + testRunID1,
+		},
+		{
+			name: "rerun",
+			call: func() error { _, err := client.RerunRun(ctx, testRunID1); return err },
+			want: "rerun " + testRunID1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireErrContains(t, tt.call(), tt.want)
+		})
+	}
+}

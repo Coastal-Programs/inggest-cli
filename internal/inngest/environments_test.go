@@ -74,3 +74,39 @@ func TestListEnvironments_AuthError(t *testing.T) {
 		t.Fatalf("want auth error, got %v", err)
 	}
 }
+
+// TestListEnvironments_MaxPagesGuard proves the cursor loop is bounded: the
+// server always claims another page follows, so only maxListPages ends it.
+func TestListEnvironments_MaxPagesGuard(t *testing.T) {
+	srv, counter := newV2Server(t, map[string]v2Route{
+		"GET " + testPathV2Envs: alwaysMoreRoute(`{"id": "env-x", "name": "loop", "type": "TEST"}`),
+	})
+
+	envs, err := newCloudClient(srv).ListEnvironments(context.Background())
+	if err != nil {
+		t.Fatalf("ListEnvironments returned error: %v", err)
+	}
+
+	if got := counter.count(); got != maxListPages {
+		t.Errorf("request count = %d, want the maxListPages cap of %d", got, maxListPages)
+	}
+	if len(envs) != maxListPages {
+		t.Errorf("collected %d envs, want %d (one per page)", len(envs), maxListPages)
+	}
+}
+
+// TestListEnvironments_TransportError covers the unreachable-API branch.
+func TestListEnvironments_TransportError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	_, err := newCloudClient(srv).ListEnvironments(context.Background())
+	requireErrContains(t, err, "list environments")
+}
+
+// TestGetEnvironment_ListError covers propagation of a failed listing.
+func TestGetEnvironment_ListError(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).GetEnvironment(context.Background(), "production")
+	requireErrContains(t, err, "list environments")
+}

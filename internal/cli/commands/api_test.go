@@ -111,3 +111,57 @@ func TestAPI_RejectsAbsoluteURL(t *testing.T) {
 		t.Errorf("absolute URL: %v", err)
 	}
 }
+
+// TestReadBodyInput covers every input source of readBodyInput, including the
+// stdin and file error branches.
+func TestReadBodyInput(t *testing.T) {
+	t.Run("inline body wins", func(t *testing.T) {
+		got, err := readBodyInput(`{"a":1}`, "ignored.json")
+		if err != nil {
+			t.Fatalf("readBodyInput returned error: %v", err)
+		}
+		if string(got) != `{"a":1}` {
+			t.Errorf("got %q, want the inline body", got)
+		}
+	})
+
+	t.Run("dash reads stdin", func(t *testing.T) {
+		setStdin(t, `{"from":"stdin"}`)
+		got, err := readBodyInput("", "-")
+		if err != nil {
+			t.Fatalf("readBodyInput returned error: %v", err)
+		}
+		if string(got) != `{"from":"stdin"}` {
+			t.Errorf("got %q, want the stdin body", got)
+		}
+	})
+
+	t.Run("stdin read error", func(t *testing.T) {
+		setStdinClosed(t)
+		_, err := readBodyInput("", "-")
+		if err == nil || !strings.Contains(err.Error(), "reading stdin") {
+			t.Errorf("err = %v, want a stdin read error", err)
+		}
+	})
+
+	t.Run("reads a file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "body.json")
+		if err := os.WriteFile(path, []byte(`{"from":"file"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readBodyInput("", path)
+		if err != nil {
+			t.Fatalf("readBodyInput returned error: %v", err)
+		}
+		if string(got) != `{"from":"file"}` {
+			t.Errorf("got %q, want the file body", got)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		_, err := readBodyInput("", filepath.Join(t.TempDir(), "nope.json"))
+		if err == nil || !strings.Contains(err.Error(), "reading ") {
+			t.Errorf("err = %v, want a file read error", err)
+		}
+	})
+}

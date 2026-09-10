@@ -104,3 +104,60 @@ func TestGetApp_Error(t *testing.T) {
 		t.Fatalf("want not found, got %v", err)
 	}
 }
+
+// TestListApps_MaxPagesGuard proves the cursor loop cannot run forever: the
+// server always claims another page follows, so only the maxListPages guard
+// can end it.
+func TestListApps_MaxPagesGuard(t *testing.T) {
+	srv, counter := newV2Server(t, map[string]v2Route{
+		"GET /v2/apps": alwaysMoreRoute(testV2App1),
+	})
+
+	apps, err := newCloudClient(srv).ListApps(context.Background(), false)
+	if err != nil {
+		t.Fatalf("ListApps returned error: %v", err)
+	}
+
+	if got := counter.count(); got != maxListPages {
+		t.Errorf("request count = %d, want the maxListPages cap of %d", got, maxListPages)
+	}
+	if len(apps) != maxListPages {
+		t.Errorf("collected %d apps, want %d (one per page)", len(apps), maxListPages)
+	}
+}
+
+// TestListApps_TransportError covers the error branch when the API is
+// unreachable (connection refused).
+func TestListApps_TransportError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	_, err := newCloudClient(srv).ListApps(context.Background(), false)
+	requireErrContains(t, err, "list apps")
+}
+
+// TestListApps_RejectedCredential proves a rejected key surfaces as an auth
+// error carrying the server's message, rather than an empty list. Returning
+// no error here would make a bad credential look like an empty account.
+func TestListApps_RejectedCredential(t *testing.T) {
+	srv := newErrorServer(t, http.StatusUnauthorized, testUnauthorized)
+
+	apps, err := newCloudClient(srv).ListApps(context.Background(), false)
+	if err == nil {
+		t.Fatal("expected an error for a rejected credential")
+	}
+	if apps != nil {
+		t.Errorf("apps = %v, want nil on error", apps)
+	}
+	if !IsAuthError(err) {
+		t.Errorf("IsAuthError(%v) = false, want true", err)
+	}
+	requireErrContains(t, err, testMsgInvalidKey)
+}
+
+// TestSyncApp_Error covers the failed-sync branch.
+func TestSyncApp_Error(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).SyncApp(context.Background(), testAppID1, "https://example.com/api/inngest")
+	requireErrContains(t, err, "sync app "+testAppID1)
+}

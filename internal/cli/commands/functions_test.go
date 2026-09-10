@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"context"
+	"sync/atomic"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
@@ -692,5 +695,118 @@ func TestFunctionsInvoke(t *testing.T) {
 	cmd.SetErr(&bytes.Buffer{})
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "invalid JSON input") {
 		t.Errorf("invalid data err = %v", err)
+	}
+}
+
+// TestFunctionsInvoke_ErrorBranches covers the failure paths of the invoke
+// command: a failed invocation, and a failed run lookup under --wait.
+//
+// The "function has no app ID" guard in functions.go is not covered here
+// because it is unreachable through this path: GetFunction resolves via
+// ListFunctions, which attaches the parent app to every function it returns
+// (internal/inngest/functions.go), so fn.App is never nil at that point.
+func TestFunctionsInvoke_ErrorBranches(t *testing.T) {
+	t.Run("invocation fails", func(t *testing.T) {
+		routes := functionsRoutes(listFunctionsResponse)
+		routes["/v2/apps/app-1/functions/fn-1/invoke"] = jsonStatus(http.StatusInternalServerError, v2ServerError)
+		srv := newMockServer(t, nil, routes)
+		defer srv.Close()
+		setupFunctionsTestState(t, srv.URL)
+
+		cmd := NewFunctionsCmd()
+		cmd.SetArgs([]string{"invoke", "process-payment"})
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "invoking function") {
+			t.Errorf("err = %v, want an invoking function error", err)
+		}
+	})
+
+	t.Run("run lookup fails under --wait", func(t *testing.T) {
+		routes := functionsRoutes(listFunctionsResponse)
+		routes["/v2/apps/app-1/functions/fn-1/invoke"] = jsonOK(`{"data":{"runId":"01RUN"}}`)
+		routes["/v2/runs/01RUN"] = jsonStatus(http.StatusInternalServerError, v2ServerError)
+		srv := newMockServer(t, nil, routes)
+		defer srv.Close()
+		setupFunctionsTestState(t, srv.URL)
+
+		cmd := NewFunctionsCmd()
+		cmd.SetArgs([]string{"invoke", "process-payment", "--wait"})
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "getting run") {
+			t.Errorf("err = %v, want a getting run error", err)
+		}
+	})
+}
+
+// TestFunctionsInvoke_WaitTextOutput covers the text-format branch of the
+// invoke command's --wait path, which prints the run detail view.
+func TestFunctionsInvoke_WaitTextOutput(t *testing.T) {
+	routes := functionsRoutes(listFunctionsResponse)
+	routes["/v2/apps/app-1/functions/fn-1/invoke"] = jsonOK(`{"data":{"runId":"01RUN"}}`)
+	routes["/v2/runs/01RUN"] = jsonOK(`{"data":{"id":"01RUN","status":"COMPLETED","function":{"id":"fn-1","name":"Process Payment","slug":"process-payment"}}}`)
+	routes["/v2/runs/01RUN/trace"] = jsonStatus(http.StatusNotFound, `{"errors":[]}`)
+	srv := newMockServer(t, nil, routes)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+
+	state.Output = testOutputText
+	t.Cleanup(func() { state.Output = testOutputJSON })
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"invoke", "process-payment", "--wait"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	got := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("invoke --wait returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(got, "01RUN") || !strings.Contains(got, "COMPLETED") {
+		t.Errorf("expected the run detail view, got:\n%s", got)
+	}
+}
+
+// TestFunctionsInvoke_WaitCancelled covers the branch where waitForRun fails:
+// the invoked run is still in progress and the context is cancelled while the
+// command polls for it.
+func TestFunctionsInvoke_WaitCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	routes := functionsRoutes(listFunctionsResponse)
+	routes["/v2/apps/app-1/functions/fn-1/invoke"] = jsonOK(`{"data":{"runId":"01RUN"}}`)
+	// RUNNING is never terminal, so waitForRun polls until the context ends.
+	// The first fetch (the command's own GetRun) must succeed; cancelling on
+	// the second lands the cancellation inside waitForRun's poll loop.
+	var runFetches atomic.Int32
+	routes["/v2/runs/01RUN"] = func(w http.ResponseWriter, r *http.Request) {
+		jsonOK(`{"data":{"id":"01RUN","status":"RUNNING","function":{"id":"fn-1","name":"Process Payment","slug":"process-payment"}}}`)(w, r)
+		if runFetches.Add(1) >= 2 {
+			cancel()
+		}
+	}
+	srv := newMockServer(t, nil, routes)
+	defer srv.Close()
+	setupFunctionsTestState(t, srv.URL)
+
+	cmd := NewFunctionsCmd()
+	cmd.SetArgs([]string{"invoke", "process-payment", "--wait"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.ExecuteContext(ctx)
+	if err == nil {
+		t.Fatal("expected an error when the context is cancelled while waiting")
+	}
+	if !strings.Contains(err.Error(), "waiting for run") {
+		t.Errorf("err = %v, want a waiting for run error", err)
 	}
 }

@@ -8,9 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"path/filepath"
+
 	"github.com/Coastal-Programs/inggest-cli/internal/cli/state"
 	"github.com/Coastal-Programs/inggest-cli/internal/common/config"
 	"github.com/Coastal-Programs/inggest-cli/internal/inngest"
+	"github.com/Coastal-Programs/inggest-cli/pkg/output"
 )
 
 func TestEventsCmdHasSubcommands(t *testing.T) {
@@ -614,5 +617,145 @@ func TestEventsTypes_ListError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "listing event types") || !inngest.IsAuthError(err) {
 		t.Errorf("expected auth error about listing event types, got: %v", err)
+	}
+}
+
+// TestReadJSONInput covers every input source of readJSONInput, including the
+// stdin and file error branches.
+func TestReadJSONInput(t *testing.T) {
+	t.Run("inline data wins", func(t *testing.T) {
+		got, err := readJSONInput(`{"a":1}`, "ignored.json")
+		if err != nil {
+			t.Fatalf("readJSONInput returned error: %v", err)
+		}
+		m, ok := got.(map[string]any)
+		if !ok || m["a"] != float64(1) {
+			t.Errorf("got %#v, want the inline payload", got)
+		}
+	})
+
+	t.Run("dash reads stdin", func(t *testing.T) {
+		setStdin(t, `{"from":"stdin"}`)
+		got, err := readJSONInput("", "-")
+		if err != nil {
+			t.Fatalf("readJSONInput returned error: %v", err)
+		}
+		m, ok := got.(map[string]any)
+		if !ok || m["from"] != "stdin" {
+			t.Errorf("got %#v, want the stdin payload", got)
+		}
+	})
+
+	t.Run("stdin read error", func(t *testing.T) {
+		setStdinClosed(t)
+		_, err := readJSONInput("", "-")
+		if err == nil || !strings.Contains(err.Error(), "reading stdin") {
+			t.Errorf("err = %v, want a stdin read error", err)
+		}
+	})
+
+	t.Run("reads a file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "payload.json")
+		if err := os.WriteFile(path, []byte(`{"from":"file"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readJSONInput("", path)
+		if err != nil {
+			t.Fatalf("readJSONInput returned error: %v", err)
+		}
+		m, ok := got.(map[string]any)
+		if !ok || m["from"] != "file" {
+			t.Errorf("got %#v, want the file payload", got)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		_, err := readJSONInput("", filepath.Join(t.TempDir(), "nope.json"))
+		if err == nil || !strings.Contains(err.Error(), "reading ") {
+			t.Errorf("err = %v, want a file read error", err)
+		}
+	})
+}
+
+// runEvents executes the events command with args and returns its stdout.
+func runEvents(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewEventsCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	var err error
+	out := captureStdout(t, func() { err = cmd.Execute() })
+	return out, err
+}
+
+// TestEventsList_SinceAndTable covers the --since duration parsing branches and
+// the table renderer, including the empty-timestamp fallback.
+func TestEventsList_SinceAndTable(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": jsonOK(`{"data":[
+			{"internal_id":"evt-1","name":"user/signup","received_at":"2024-01-01T00:00:00Z"},
+			{"internal_id":"evt-2","name":"user/login"}
+		]}`),
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	t.Run("table output", func(t *testing.T) {
+		state.Output = string(output.FormatTable)
+		t.Cleanup(func() { state.Output = string(output.FormatJSON) })
+
+		got, err := runEvents(t, "list", "--since", "1h")
+		if err != nil {
+			t.Fatalf("events list returned error: %v", err)
+		}
+		if !strings.Contains(got, "evt-1") || !strings.Contains(got, "user/login") {
+			t.Errorf("expected both events in the table, got:\n%s", got)
+		}
+	})
+
+	t.Run("invalid since", func(t *testing.T) {
+		_, err := runEvents(t, "list", "--since", "not-a-duration")
+		if err == nil || !strings.Contains(err.Error(), "invalid --since duration") {
+			t.Errorf("err = %v, want an invalid --since error", err)
+		}
+	})
+}
+
+// TestEventsList_ServerError covers the failed-listing branch on a 500.
+// (TestEventsList_Error above covers the rejected-credential case.)
+func TestEventsList_ServerError(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v1/events": jsonStatus(http.StatusInternalServerError, v2ServerError),
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	_, err := runEvents(t, "list")
+	if err == nil || !strings.Contains(err.Error(), "listing events") {
+		t.Errorf("err = %v, want a listing events error", err)
+	}
+}
+
+// TestEventsTypes_WithSchemaFlag covers the --schema branch, which prints the
+// full schema records instead of just the event names.
+// (TestEventsTypes_Success above covers the default name-only output.)
+func TestEventsTypes_WithSchemaFlag(t *testing.T) {
+	srv := newMockServer(t, nil, map[string]http.HandlerFunc{
+		"/v2/insights/events/schemas": jsonOK(`{"data":[{"name":"user/signup","schema":{"type":"object"}}],"page":{"hasMore":false}}`),
+	})
+	defer srv.Close()
+	setupCloudState(t, srv.URL)
+
+	got, err := runEvents(t, "types", "--schema")
+	if err != nil {
+		t.Fatalf("events types --schema returned error: %v", err)
+	}
+	if !strings.Contains(got, "user/signup") {
+		t.Errorf("expected the event name in output, got:\n%s", got)
+	}
+	// The schema itself only appears with the flag set.
+	if !strings.Contains(got, "object") {
+		t.Errorf("expected the inferred schema in output, got:\n%s", got)
 	}
 }

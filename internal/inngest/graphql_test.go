@@ -3,10 +3,13 @@ package inngest
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecuteGraphQL_Success(t *testing.T) {
@@ -369,5 +372,270 @@ func TestExecuteGraphQL_NewRequestError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "create graphql request") {
 		t.Errorf("expected 'create graphql request' error, got: %v", err)
+	}
+}
+
+// TestDevGraphQLOperations_TransportErrors covers the error branch of every
+// dev-mode GraphQL wrapper: when the dev server is unreachable, each call must
+// fail with its own contextual message rather than a bare transport error.
+func TestDevGraphQLOperations_TransportErrors(t *testing.T) {
+	srv := newClosedServer(t)
+	client := newDevClient(srv)
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{
+			name: "cancel run",
+			call: func() error { _, err := client.CancelRun(ctx, testRunID1); return err },
+			want: "cancel run " + testRunID1,
+		},
+		{
+			name: "rerun",
+			call: func() error { _, err := client.RerunRun(ctx, testRunID1); return err },
+			want: "rerun " + testRunID1,
+		},
+		{
+			name: "list functions",
+			call: func() error { _, err := client.ListFunctions(ctx); return err },
+			want: "list functions",
+		},
+		{
+			name: "list apps",
+			call: func() error { _, err := client.ListApps(ctx, false); return err },
+			want: "list apps",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireErrContains(t, tt.call(), tt.want)
+		})
+	}
+}
+
+// TestInvokeDevFunction_Errors covers the failure branches of the dev invoke
+// flow: a rejected mutation, and a context cancelled while polling for the run
+// the invocation should have produced.
+func TestInvokeDevFunction_Errors(t *testing.T) {
+	fnResp := `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`
+
+	t.Run("dev server declines the invocation", func(t *testing.T) {
+		srv, _ := newDevGQLServer(t, map[string]string{
+			"DevFunctions": fnResp,
+			"DevInvoke":    `{"data":{"invokeFunction":false}}`,
+		})
+
+		_, err := newDevClient(srv).InvokeDevFunction(context.Background(), testSlugSend, nil)
+		requireErrContains(t, err, "did not accept the invocation")
+	})
+
+	t.Run("context cancelled while polling", func(t *testing.T) {
+		srv, rec := newDevGQLServer(t, map[string]string{
+			"DevFunctions": fnResp,
+			"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+			// No run ever appears, so the caller keeps polling until the
+			// context is cancelled.
+			"DevRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false}}}}`,
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := newDevClient(srv).InvokeDevFunction(ctx, testSlugSend, nil)
+			errCh <- err
+		}()
+
+		// Cancel once the first poll has been served so the ctx.Done() arm of
+		// the poll loop is the branch that ends it.
+		waitFor(t, func() bool { return rec.countOp("DevRuns") > 0 })
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("err = %v, want context.Canceled", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("InvokeDevFunction did not return after cancellation")
+		}
+	})
+}
+
+// TestDevGraphQLReads_TransportErrors covers the error branch of the dev-mode
+// read operations, each of which wraps the failure with its own context.
+func TestDevGraphQLReads_TransportErrors(t *testing.T) {
+	srv := newClosedServer(t)
+	client := newDevClient(srv)
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{
+			name: "get run",
+			call: func() error { _, err := client.GetRun(ctx, testRunID1); return err },
+			want: "get run " + testRunID1,
+		},
+		{
+			name: "get event runs",
+			call: func() error { _, err := client.GetEventRuns(ctx, testEventID1); return err },
+			want: "get event runs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireErrContains(t, tt.call(), tt.want)
+		})
+	}
+}
+
+// TestDevCancelRun_EchoesRunIDWhenServerOmitsIt covers the fallback branch:
+// the dev server acknowledges without echoing an ID, so the requested run ID
+// is returned instead of an empty string.
+func TestDevCancelRun_EchoesRunIDWhenServerOmitsIt(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{
+		"DevCancelRun": `{"data":{"cancelRun":{"id":""}}}`,
+	})
+
+	got, err := newDevClient(srv).CancelRun(context.Background(), testRunID1)
+	if err != nil {
+		t.Fatalf("CancelRun returned error: %v", err)
+	}
+	if got != testRunID1 {
+		t.Errorf("CancelRun = %q, want the requested ID %q", got, testRunID1)
+	}
+}
+
+// TestInvokeDevFunction_FunctionLookupError covers the branch where the
+// function cannot be resolved, so no invocation is attempted.
+func TestInvokeDevFunction_FunctionLookupError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	_, err := newDevClient(srv).InvokeDevFunction(context.Background(), testSlugSend, nil)
+	requireErrContains(t, err, "list functions")
+}
+
+// TestInvokeDevFunction_MutationError covers the branch where the invoke
+// mutation itself fails.
+func TestInvokeDevFunction_MutationError(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`,
+		"DevInvoke":    `{"errors":[{"message":"boom"}]}`,
+	})
+
+	_, err := newDevClient(srv).InvokeDevFunction(context.Background(), testSlugSend, nil)
+	requireErrContains(t, err, "invoke function "+testSlugSend)
+}
+
+// TestInvokeDevFunction_ReturnsRunID covers the success path where the polled
+// run appears immediately.
+func TestInvokeDevFunction_ReturnsRunID(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+		"DevRuns":      `{"data":{"runs":{"edges":[{"node":{"id":"` + testRunID1 + `","status":"RUNNING"}}],"pageInfo":{"hasNextPage":false}}}}`,
+	})
+
+	got, err := newDevClient(srv).InvokeDevFunction(context.Background(), testSlugSend, nil)
+	if err != nil {
+		t.Fatalf("InvokeDevFunction returned error: %v", err)
+	}
+	if got != testRunID1 {
+		t.Errorf("InvokeDevFunction = %q, want %q", got, testRunID1)
+	}
+}
+
+// TestDevListRuns_TimeFieldMapping covers the TimeField switch, which maps the
+// CLI's --time-field values onto the dev server's enum.
+func TestDevListRuns_TimeFieldMapping(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"startedat", "STARTED_AT"},
+		{"started_at", "STARTED_AT"},
+		{"endedat", "ENDED_AT"},
+		{"ended_at", "ENDED_AT"},
+		{"", "QUEUED_AT"},
+	} {
+		t.Run(tt.in, func(t *testing.T) {
+			srv, rec := newDevGQLServer(t, map[string]string{
+				"DevRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false}}}}`,
+			})
+
+			if _, err := newDevClient(srv).ListRuns(context.Background(), ListRunsOptions{First: 1, TimeField: tt.in}); err != nil {
+				t.Fatalf("ListRuns returned error: %v", err)
+			}
+
+			vars := rec.last(t).Variables
+			if got := fmt.Sprint(vars["orderBy"]); !strings.Contains(got, tt.want) {
+				t.Errorf("orderBy = %v, want it to use %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDevCancelRun_ReturnsServerID covers the branch where the dev server
+// echoes the cancelled run ID, which is returned in preference to the input.
+func TestDevCancelRun_ReturnsServerID(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{
+		"DevCancelRun": `{"data":{"cancelRun":{"id":"` + testCancelledRunID + `"}}}`,
+	})
+
+	got, err := newDevClient(srv).CancelRun(context.Background(), testRunID1)
+	if err != nil {
+		t.Fatalf("CancelRun returned error: %v", err)
+	}
+	if got != testCancelledRunID {
+		t.Errorf("CancelRun = %q, want the server's ID %q", got, testCancelledRunID)
+	}
+}
+
+// TestInvokeDevFunction_PollErrorPropagates covers the branch where a poll for
+// the newly-invoked run fails.
+func TestInvokeDevFunction_PollErrorPropagates(t *testing.T) {
+	srv, _ := newDevGQLServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+		"DevRuns":      `{"errors":[{"message":"poll exploded"}]}`,
+	})
+
+	_, err := newDevClient(srv).InvokeDevFunction(context.Background(), testSlugSend, nil)
+	requireErrContains(t, err, "poll exploded")
+}
+
+// TestInvokeDevFunction_SettleTimeout covers the poll loop's exhaustion path:
+// the invocation is accepted but the run never becomes visible, so the call
+// returns an empty ID with a nil error once devInvokeSettleTimeout elapses.
+// This also exercises the 250ms inter-poll wait.
+//
+// The wait is real, so the test runs in parallel to overlap with the rest of
+// the package rather than adding its full duration to the suite.
+func TestInvokeDevFunction_SettleTimeout(t *testing.T) {
+	t.Parallel()
+
+	srv, rec := newDevGQLServer(t, map[string]string{
+		"DevFunctions": `{"data":{"functions":[{"id":"` + testFnID1 + `","slug":"` + testSlugSend + `"}]}}`,
+		"DevInvoke":    `{"data":{"invokeFunction":true}}`,
+		// The run never appears, so the loop polls until the deadline passes.
+		"DevRuns": `{"data":{"runs":{"edges":[],"pageInfo":{"hasNextPage":false}}}}`,
+	})
+
+	runID, err := newDevClient(srv).InvokeDevFunction(context.Background(), testSlugSend, nil)
+	if err != nil {
+		t.Fatalf("InvokeDevFunction returned error: %v", err)
+	}
+	if runID != "" {
+		t.Errorf("InvokeDevFunction = %q, want an empty ID when the run never settles", runID)
+	}
+	// Proves the 250ms wait arm ran: a single poll could not span the timeout.
+	if got := rec.countOp("DevRuns"); got < 2 {
+		t.Errorf("DevRuns poll count = %d, want at least 2", got)
 	}
 }

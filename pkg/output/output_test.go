@@ -162,6 +162,26 @@ func TestPrint_Text_Map(t *testing.T) {
 	}
 }
 
+// TestPrint_Text_Map_SortedKeys pins the deterministic key order of text map
+// output. Go randomises map iteration, so the keys are inserted out of order
+// and the whole run is repeated to make an accidental pass unlikely.
+func TestPrint_Text_Map_SortedKeys(t *testing.T) {
+	in := map[string]string{"zeta": "3", "alpha": "1", "mu": "2"}
+	want := "alpha: 1\nmu: 2\nzeta: 3\n"
+
+	for range 20 {
+		got, err := captureStdout(t, func() error {
+			return output.Print(in, output.FormatText)
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != want {
+			t.Fatalf("map keys not sorted:\ngot:  %q\nwant: %q", got, want)
+		}
+	}
+}
+
 func TestPrint_Text_Scalar(t *testing.T) {
 	got, err := captureStdout(t, func() error {
 		return output.Print("hello", output.FormatText)

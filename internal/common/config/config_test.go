@@ -550,3 +550,91 @@ func TestSave_WriteFileError(t *testing.T) {
 		t.Errorf("error should mention 'writing config file', got: %v", err)
 	}
 }
+
+// --- GetAPIKey ---
+
+func TestGetAPIKey_FromConfig(t *testing.T) {
+	cfg := &Config{APIKey: "ak-from-config"}
+	if got := cfg.GetAPIKey(); got != "ak-from-config" {
+		t.Errorf("got %q, want ak-from-config", got)
+	}
+}
+
+func TestGetAPIKey_FallsBackToEnvVar(t *testing.T) {
+	t.Setenv("INNGEST_API_KEY", "ak-from-env")
+	cfg := &Config{}
+	if got := cfg.GetAPIKey(); got != "ak-from-env" {
+		t.Errorf("got %q, want ak-from-env", got)
+	}
+}
+
+func TestGetAPIKey_EnvTakesPrecedence(t *testing.T) {
+	t.Setenv("INNGEST_API_KEY", "ak-from-env")
+	cfg := &Config{APIKey: "ak-from-config"}
+	if got := cfg.GetAPIKey(); got != "ak-from-env" {
+		t.Errorf("got %q, want ak-from-env", got)
+	}
+}
+
+func TestGetAPIKey_EmptyWhenNotSet(t *testing.T) {
+	cfg := &Config{}
+	if got := cfg.GetAPIKey(); got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}
+
+// --- GetAPICredential ---
+
+// TestGetAPICredential_Precedence pins the documented credential order:
+// INNGEST_API_KEY > INNGEST_SIGNING_KEY > config api_key > config signing_key.
+// This decides which secret is sent to the Inngest API, so each rung of the
+// ladder is asserted with every lower-priority source also populated.
+func TestGetAPICredential_Precedence(t *testing.T) {
+	tests := []struct {
+		name      string
+		envAPI    string
+		envSignin string
+		cfg       *Config
+		want      string
+	}{
+		{
+			name:      "env api key wins over everything",
+			envAPI:    "ak-env",
+			envSignin: "sk-env",
+			cfg:       &Config{APIKey: "ak-cfg", SigningKey: "sk-cfg"},
+			want:      "ak-env",
+		},
+		{
+			name:      "env signing key wins when no env api key",
+			envSignin: "sk-env",
+			cfg:       &Config{APIKey: "ak-cfg", SigningKey: "sk-cfg"},
+			want:      "sk-env",
+		},
+		{
+			name: "config api key wins when no env vars",
+			cfg:  &Config{APIKey: "ak-cfg", SigningKey: "sk-cfg"},
+			want: "ak-cfg",
+		},
+		{
+			name: "config signing key is the last resort",
+			cfg:  &Config{SigningKey: "sk-cfg"},
+			want: "sk-cfg",
+		},
+		{
+			name: "empty when nothing is configured",
+			cfg:  &Config{},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INNGEST_API_KEY", tt.envAPI)
+			t.Setenv("INNGEST_SIGNING_KEY", tt.envSignin)
+
+			if got := tt.cfg.GetAPICredential(); got != tt.want {
+				t.Errorf("GetAPICredential() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

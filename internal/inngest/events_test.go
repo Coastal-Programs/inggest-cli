@@ -227,3 +227,136 @@ func TestListEventSchemas_DevDerivesNames(t *testing.T) {
 		t.Fatalf("dev schemas = (%+v, %v), want sorted distinct names", schemas, err)
 	}
 }
+
+// TestSendEvent_RequestConstructionError covers the branch where the event URL
+// cannot form a valid request, so nothing is sent.
+//
+// Dev mode is used deliberately: in cloud mode eventURL() targets the hardcoded
+// public event host, so a cloud-mode client here would send a real request to
+// the internet instead of testing the local branch.
+func TestSendEvent_RequestConstructionError(t *testing.T) {
+	client := NewClient(ClientOptions{DevServerURL: testInvalidURL, DevMode: true})
+
+	_, err := client.SendEvent(context.Background(), EventInput{Name: "test/event"})
+	requireErrContains(t, err, "create send event request")
+}
+
+// TestSendEvent_TransportError covers the unreachable Event API branch. Dev
+// mode keeps the request pointed at the local test server.
+func TestSendEvent_TransportError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	_, err := newDevClient(srv).SendEvent(context.Background(), EventInput{Name: "test/event"})
+	requireErrContains(t, err, "send event")
+}
+
+// TestGetEventRuns_MaxPagesGuard proves the event-runs cursor loop is bounded.
+func TestGetEventRuns_MaxPagesGuard(t *testing.T) {
+	srv, counter := newV2Server(t, map[string]v2Route{
+		"GET /v2/events/" + testEventID1 + "/runs": alwaysMoreRoute(`{"id": "` + testRunID1 + `", "status": "COMPLETED"}`),
+	})
+
+	runs, err := newCloudClient(srv).GetEventRuns(context.Background(), testEventID1)
+	if err != nil {
+		t.Fatalf("GetEventRuns returned error: %v", err)
+	}
+
+	if got := counter.count(); got != maxListPages {
+		t.Errorf("request count = %d, want the maxListPages cap of %d", got, maxListPages)
+	}
+	if len(runs) != maxListPages {
+		t.Errorf("collected %d runs, want %d (one per page)", len(runs), maxListPages)
+	}
+}
+
+// TestGetEventRuns_Error covers the failed-request branch.
+func TestGetEventRuns_Error(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).GetEventRuns(context.Background(), testEventID1)
+	requireErrContains(t, err, "get event runs")
+}
+
+// TestListEventSchemas_MaxPagesGuard proves the schema cursor loop is bounded.
+func TestListEventSchemas_MaxPagesGuard(t *testing.T) {
+	srv, counter := newV2Server(t, map[string]v2Route{
+		"GET /v2/insights/events/schemas": alwaysMoreRoute(`{"name": "test/event"}`),
+	})
+
+	schemas, err := newCloudClient(srv).ListEventSchemas(context.Background())
+	if err != nil {
+		t.Fatalf("ListEventSchemas returned error: %v", err)
+	}
+
+	if got := counter.count(); got != maxListPages {
+		t.Errorf("request count = %d, want the maxListPages cap of %d", got, maxListPages)
+	}
+	if len(schemas) != maxListPages {
+		t.Errorf("collected %d schemas, want %d (one per page)", len(schemas), maxListPages)
+	}
+}
+
+// TestListEventSchemas_Error covers the failed-request branch.
+func TestListEventSchemas_Error(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).ListEventSchemas(context.Background())
+	requireErrContains(t, err, "list event schemas")
+}
+
+// TestGetEvent_Error covers the failed single-event fetch branch.
+func TestGetEvent_Error(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).GetEvent(context.Background(), testEventID1)
+	requireErrContains(t, err, "get event")
+}
+
+// TestSendEvent_RESTFallbackError covers the REST fallback used when no event
+// key is configured: with no key, SendEvent posts to /v2/events instead of the
+// Event API, and a failure there must surface.
+func TestSendEvent_RESTFallbackError(t *testing.T) {
+	srv := newErrorServer(t, http.StatusInternalServerError, testServerErrorResp)
+
+	_, err := newCloudClient(srv).SendEvent(context.Background(), EventInput{Name: "test/event"})
+	requireErrContains(t, err, "send event")
+}
+
+// TestDevEventTypes_ListError covers propagation of a failed event listing
+// when deriving event types on the dev server.
+func TestDevEventTypes_ListError(t *testing.T) {
+	srv := newClosedServer(t)
+
+	_, err := newDevClient(srv).ListEventSchemas(context.Background())
+	if err == nil {
+		t.Fatal("expected an error when the dev event listing fails")
+	}
+}
+
+// TestSendEvent_MarshalError covers the branch where the event payload cannot
+// be marshalled. EventInput.Data is `any`, so a caller can supply a value the
+// JSON encoder rejects (a channel), and the failure must be reported rather
+// than sending a malformed body.
+func TestSendEvent_MarshalError(t *testing.T) {
+	srv := newUnusedServer(t)
+
+	_, err := newDevClient(srv).SendEvent(context.Background(), EventInput{
+		Name: "test/event",
+		Data: make(chan int),
+	})
+	requireErrContains(t, err, "marshal event")
+}
+
+// TestSendEvent_ReadBodyError covers the branch where the Event API responds
+// but the body cannot be fully read.
+func TestSendEvent_ReadBodyError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer srv.Close()
+
+	_, err := newDevClient(srv).SendEvent(context.Background(), EventInput{Name: "test/event"})
+	requireErrContains(t, err, "read send event response")
+}

@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -104,3 +106,66 @@ func jsonStatus(status int, body string) http.HandlerFunc {
 
 // v2Unauthorized is the REST v2 body for a rejected credential.
 const v2Unauthorized = `{"errors":[{"code":"authorization_header_missing","message":"authorization header missing or invalid"}]}`
+
+// v2ServerError is the REST v2 body for a 5xx failure.
+const v2ServerError = `{"errors":[{"code":"internal_error","message":"something went wrong"}]}`
+
+// captureStderr redirects os.Stderr to a pipe, runs fn, then returns what was written.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = old
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("reading pipe: %v", err)
+	}
+	return buf.String()
+}
+
+// setStdin replaces os.Stdin with a pipe pre-loaded with input for the test's duration.
+func setStdin(t *testing.T, input string) {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	if _, err := w.WriteString(input); err != nil {
+		t.Fatalf("writing stdin: %v", err)
+	}
+	w.Close()
+
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = old
+		r.Close()
+	})
+}
+
+// setStdinClosed points os.Stdin at a closed pipe so reads fail.
+func setStdinClosed(t *testing.T) {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	w.Close()
+	r.Close()
+
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = old })
+}
