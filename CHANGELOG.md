@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.1] - 2026-09-10
+
+### Added
+- Test coverage for the REST v2 client and command paths: cursor pagination
+  guards, transport and body-read failures, rejected credentials, the dev
+  GraphQL invoke flow, API credential precedence, global flag precedence and
+  the raw `api` passthrough.
+- `internal/inngest`, `internal/common/config`, `internal/cli` and `pkg/output`
+  are now at 100% statement coverage; `internal/cli/commands` at 99.9%.
+
+### Fixed
+- Two flaky tests that failed depending on timing and ordering: one raced a
+  poll against its own context timeout, the other reused a cached config path.
+
+No user-facing behaviour changed in this release; it contains no production
+code changes.
+
 ## [0.3.0] - 2026-09-09
 
 ### Fixed
