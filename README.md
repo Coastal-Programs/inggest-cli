@@ -312,7 +312,7 @@ Built in Go with a focus on simplicity, reliability, and minimal dependencies.
 - **API**: Inngest [REST API v2](https://api-docs.inngest.com) (runs, functions, apps, envs, invoke, trace) and v1 (events); the dev server's GraphQL API when `--dev` is set
 - **Config**: Environment variables + JSON config file
 - **Output**: JSON / text / table via `pkg/output.Printer`
-- **Dependencies**: 2 Go modules (cobra, pflag) — near-zero supply chain risk
+- **Dependencies**: 2 direct Go modules (cobra, `golang.org/x/term`) — 5 in `go.mod` including indirect, near-zero supply chain risk
 
 ## Contributing
 
@@ -329,6 +329,15 @@ make hooks      # install git hooks via lefthook (opt-in)
 Git hooks are managed with [lefthook](https://lefthook.dev) and are **opt-in**.
 Run `make hooks` (after installing lefthook) to enable a `pre-commit` gate
 (`gofmt` + `go vet`) and a `pre-push` test run.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, testing
+requirements and the pull request process.
+
+## Security
+
+Found a vulnerability? Please do **not** open a public issue — see
+[SECURITY.md](SECURITY.md) for how to report it privately, and for how the CLI
+stores and redacts your credentials.
 
 ## License
 
